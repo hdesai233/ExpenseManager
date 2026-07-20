@@ -1,0 +1,481 @@
+import { useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
+import {
+  applyTransactionFilter, buildReport, defaultRangeFor, REPORT_TEMPLATES,
+  type ReportData, type ReportSections, type ReportTemplateKey, type TransactionFilter,
+} from '../lib/report';
+import { currentYM, shortDate, usd, usd2 } from '../lib/format';
+import { isDesktop } from '../lib/persist';
+import { accountName, categoryName, useStore } from '../store';
+import { PieChartSvg, TrendChart, Toggle, downloadSvgAsImage } from '../components/ui';
+
+const CAT_COLORS = ['#1f6f5c', '#4a9d86', '#c8892b', '#86b8a5', '#d9a441', '#7c6f9c', '#b0736a', '#9aa06b', '#5a7f9c', '#cdc7bb'];
+
+export default function Reports() {
+  const { state } = useStore();
+  const [template, setTemplate] = useState<ReportTemplateKey>('monthly');
+  const [anchorYM, setAnchorYM] = useState(currentYM());
+  const [customStart, setCustomStart] = useState(`${currentYM()}-01`);
+  const [customEnd, setCustomEnd] = useState(currentYM() + '-' + String(new Date(+currentYM().slice(0, 4), +currentYM().slice(5, 7), 0).getDate()));
+  const [sections, setSections] = useState<ReportSections>(REPORT_TEMPLATES[0].defaultSections);
+  const [pdfStatus, setPdfStatus] = useState<string | null>(null);
+
+  const pieRef = useRef<HTMLDivElement>(null);
+  const trendRef = useRef<HTMLDivElement>(null);
+
+  const templateDef = REPORT_TEMPLATES.find(t => t.key === template)!;
+
+  const range = useMemo(() => {
+    if (template === 'custom') return { start: customStart, end: customEnd, label: `${shortDate(customStart)} – ${shortDate(customEnd)}` };
+    return defaultRangeFor(template, anchorYM);
+  }, [template, anchorYM, customStart, customEnd]);
+
+  const report: ReportData = useMemo(
+    () => buildReport(state, range, templateDef.label),
+    [state, range, templateDef.label],
+  );
+
+  const selectTemplate = (key: ReportTemplateKey) => {
+    setTemplate(key);
+    setSections(REPORT_TEMPLATES.find(t => t.key === key)!.defaultSections);
+  };
+
+  const toggleSection = (key: keyof ReportSections) => setSections(s => ({ ...s, [key]: !s[key] }));
+
+  const doPrint = () => window.print();
+
+  const savePdf = async () => {
+    const filename = `ledger-${template}-${range.start}`;
+    if (window.ledgerApi) {
+      setPdfStatus('Rendering PDF…');
+      const result = await window.ledgerApi.exportPdf(filename);
+      setPdfStatus(result.ok ? `Saved to ${result.path}` : null);
+    } else {
+      window.print();
+    }
+  };
+
+  const exportChart = (which: 'pie' | 'trend', format: 'svg' | 'png') => {
+    const container = which === 'pie' ? pieRef.current : trendRef.current;
+    const svg = container?.querySelector('svg');
+    if (svg) downloadSvgAsImage(svg, `ledger-${which}-${range.start}`, format);
+  };
+
+  const donutSlices = report.categories.slice(0, 9).map((c, i) => ({ color: c.category.color || CAT_COLORS[i % CAT_COLORS.length], pct: c.pct, label: c.category.name }));
+  const trendPoints = report.trend.map(m => ({ label: m.label, value: m.spend }));
+
+  return (
+    <div className="page">
+      <div className="no-print" style={{ marginBottom: 18 }}>
+        <div className="page-title">Reports &amp; Export</div>
+        <div className="page-sub">Generate a PDF report, export filtered data, or back up everything — all built and rendered on this device.</div>
+      </div>
+
+      {/* ---- report builder controls ---- */}
+      <div className="no-print card" style={{ padding: '18px 20px', marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
+          {REPORT_TEMPLATES.map(t => (
+            <button key={t.key} onClick={() => selectTemplate(t.key)}
+              style={{
+                textAlign: 'left', padding: '12px 13px', borderRadius: 11, cursor: 'pointer',
+                border: '1px solid ' + (template === t.key ? 'var(--green-2)' : 'var(--card-border)'),
+                background: template === t.key ? '#f2f7f4' : '#fff',
+              }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 3 }}>{t.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted-2)', lineHeight: 1.4 }}>{t.description}</div>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap', paddingTop: 14, borderTop: '1px solid var(--row-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {templateDef.fixedRange ? (
+              template === 'annual' ? (
+                <>
+                  <label className="field" style={{ marginBottom: 0 }}>Year</label>
+                  <input className="input" type="number" style={{ width: 90 }} value={anchorYM.slice(0, 4)}
+                    onChange={e => setAnchorYM(`${e.target.value}-01`)} />
+                </>
+              ) : (
+                <>
+                  <label className="field" style={{ marginBottom: 0 }}>Month</label>
+                  <input className="input" type="month" value={anchorYM} onChange={e => setAnchorYM(e.target.value)} />
+                </>
+              )
+            ) : (
+              <>
+                <label className="field" style={{ marginBottom: 0 }}>From</label>
+                <input className="input" type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+                <label className="field" style={{ marginBottom: 0 }}>to</label>
+                <input className="input" type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+              </>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            {([
+              ['summary', 'Summary'], ['categoryBreakdown', 'Categories'], ['budgetVsActual', 'Budget vs actual'],
+              ['topMerchants', 'Top merchants'], ['trend', 'Trend'], ['transactions', 'Itemized transactions'],
+            ] as Array<[keyof ReportSections, string]>).map(([key, label]) => (
+              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={sections[key]} onChange={() => toggleSection(key)} />
+                {label}
+              </label>
+            ))}
+          </div>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="btn-ghost" onClick={doPrint}>Print</button>
+            <button className="btn" onClick={savePdf}>Save as PDF</button>
+          </div>
+        </div>
+        {pdfStatus && <div style={{ fontSize: 11.5, color: 'var(--green-conf)', marginTop: 10 }}>{pdfStatus}</div>}
+      </div>
+
+      {/* ---- report preview / print target ---- */}
+      <div className="report-print-area">
+        <div className="card" style={{ padding: '26px 28px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 22, paddingBottom: 16, borderBottom: '1px solid var(--row-border)' }}>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--ink-2)' }}>{report.title}</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>{report.range.label} · {state.settings.householdName}</div>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted-2)', textAlign: 'right' }}>Generated {shortDate(report.generatedAt)}<br />Local · private</div>
+          </div>
+
+          {sections.summary && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 22 }}>
+              <SummaryTile label="Income" value={usd(report.income)} />
+              <SummaryTile label="Expenses" value={usd(report.expense)} />
+              <SummaryTile label="Net" value={(report.net >= 0 ? '+' : '') + usd(report.net)} color={report.net >= 0 ? 'var(--green-ok)' : 'var(--red)'} />
+              <SummaryTile label="Savings rate" value={Math.round(report.savingsRate * 100) + '%'} />
+            </div>
+          )}
+
+          {sections.categoryBreakdown && report.categories.length > 0 && (
+            <ReportSection title="Spending by category">
+              <div style={{ display: 'flex', gap: 26, alignItems: 'center' }}>
+                <div className="no-print-inline" style={{ position: 'relative' }}>
+                  <div ref={pieRef}><PieChartSvg size={150} slices={donutSlices} /></div>
+                  <ChartExportButtons onExport={f => exportChart('pie', f)} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                    <tbody>
+                      {report.categories.slice(0, 12).map((c, i) => (
+                        <tr key={c.category.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                          <td style={{ padding: '5px 0', width: 16 }}><span className="dot" style={{ width: 9, height: 9, background: c.category.color || CAT_COLORS[i % CAT_COLORS.length] }} /></td>
+                          <td style={{ padding: '5px 8px', color: 'var(--ink-3)' }}>{c.category.name}</td>
+                          <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{Math.round(c.pct * 100)}%</td>
+                          <td style={{ padding: '5px 0 5px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--ink)' }}>{usd(c.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </ReportSection>
+          )}
+
+          {sections.budgetVsActual && report.budgetRows.length > 0 && (
+            <ReportSection title="Budget vs. actual">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--soft-border)' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Category</th>
+                    <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Actual</th>
+                    <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Budget</th>
+                    <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.budgetRows.map(b => (
+                    <tr key={b.category.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                      <td style={{ padding: '6px 0', color: 'var(--ink-3)' }}>{b.category.name}</td>
+                      <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, color: b.over ? 'var(--red)' : 'var(--ink)' }}>{usd(b.actual)}</td>
+                      <td style={{ padding: '6px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{usd(b.target)}</td>
+                      <td style={{ padding: '6px 0', textAlign: 'right', color: b.over ? 'var(--red)' : 'var(--green-conf)' }}>{Math.round(b.pct * 100)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ReportSection>
+          )}
+
+          {sections.trend && report.trend.length > 1 && (
+            <ReportSection title="Monthly spend trend">
+              <div className="no-print-inline" style={{ position: 'relative' }}>
+                <div ref={trendRef}><TrendChart width={640} height={180} series={trendPoints} forecastIndex={trendPoints.length} yTicks /></div>
+                <ChartExportButtons onExport={f => exportChart('trend', f)} />
+              </div>
+            </ReportSection>
+          )}
+
+          {sections.topMerchants && report.merchants.length > 0 && (
+            <ReportSection title="Top merchants">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <tbody>
+                  {report.merchants.map(m => (
+                    <tr key={m.name} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                      <td style={{ padding: '5px 0', color: 'var(--ink-3)' }}>{m.name}</td>
+                      <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{m.count}×</td>
+                      <td style={{ padding: '5px 0 5px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--ink)' }}>{usd(m.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ReportSection>
+          )}
+
+          {sections.transactions && (
+            <ReportSection title={`Itemized transactions (${report.transactions.length})`}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--soft-border)' }}>
+                    <th style={{ textAlign: 'left', padding: '5px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Date</th>
+                    <th style={{ textAlign: 'left', padding: '5px 8px', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Merchant</th>
+                    <th style={{ textAlign: 'left', padding: '5px 8px', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Category</th>
+                    <th style={{ textAlign: 'left', padding: '5px 8px', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Account</th>
+                    <th style={{ textAlign: 'right', padding: '5px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.transactions.map(t => (
+                    <tr key={t.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                      <td style={{ padding: '4px 0', color: 'var(--muted)' }}>{shortDate(t.date)}</td>
+                      <td style={{ padding: '4px 8px', color: 'var(--ink-3)' }}>{t.merchantNormalized}</td>
+                      <td style={{ padding: '4px 8px', color: 'var(--muted-2)' }}>{categoryName(state, t.subcategoryId ?? t.categoryId)}</td>
+                      <td style={{ padding: '4px 8px', color: 'var(--muted-2)' }}>{accountName(state, t.accountId)}</td>
+                      <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 600, color: t.amount > 0 ? 'var(--green-ok)' : 'var(--ink)' }}>{usd2(t.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ReportSection>
+          )}
+        </div>
+      </div>
+
+      <div className="no-print">
+        <FilteredExportCard />
+        <TaxExportCard report={report} />
+        <ScheduledReportsCard />
+      </div>
+    </div>
+  );
+}
+
+function SummaryTile({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div style={{ background: 'var(--soft)', border: '1px solid var(--soft-border)', borderRadius: 10, padding: '12px 14px' }}>
+      <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>{label}</div>
+      <div style={{ fontSize: 21, fontWeight: 300, color: color ?? 'var(--ink)', marginTop: 4 }}>{value}</div>
+    </div>
+  );
+}
+
+function ReportSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginTop: 22 }}>
+      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 10 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function ChartExportButtons({ onExport }: { onExport: (format: 'svg' | 'png') => void }) {
+  return (
+    <div className="no-print" style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+      <button className="link-sm" onClick={() => onExport('png')}>Export PNG</button>
+      <button className="link-sm" onClick={() => onExport('svg')}>Export SVG</button>
+    </div>
+  );
+}
+
+function FilteredExportCard() {
+  const { state } = useStore();
+  const [filter, setFilter] = useState<TransactionFilter>({ flow: 'all' });
+  const [status, setStatus] = useState<string | null>(null);
+
+  const filtered = useMemo(() => applyTransactionFilter(state.transactions, filter), [state.transactions, filter]);
+  const topCats = state.categories.filter(c => !c.parentId);
+
+  const download = (name: string, content: BlobPart, type: string) => {
+    const blob = new Blob([content], { type });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const exportCSV = () => {
+    const header = 'date,merchant,raw_description,amount,currency,account,category,flow_type,tags,notes';
+    const esc = (s: string) => '"' + s.replace(/"/g, '""') + '"';
+    const rows = filtered.map(t => [
+      t.date, esc(t.merchantNormalized), esc(t.merchantRaw), t.amount.toFixed(2), t.currency,
+      esc(state.accounts.find(a => a.id === t.accountId)?.name ?? ''),
+      esc(categoryName(state, t.subcategoryId ?? t.categoryId)),
+      t.flowType, esc(t.tags.join(';')), esc(t.notes),
+    ].join(','));
+    download('ledger-filtered.csv', [header, ...rows].join('\n'), 'text/csv');
+    setStatus(`Exported ${filtered.length} transactions to CSV.`);
+  };
+
+  const exportExcel = () => {
+    const rows = filtered.map(t => ({
+      Date: t.date, Merchant: t.merchantNormalized, 'Raw description': t.merchantRaw, Amount: t.amount,
+      Account: state.accounts.find(a => a.id === t.accountId)?.name ?? '',
+      Category: categoryName(state, t.subcategoryId ?? t.categoryId),
+      'Flow type': t.flowType, Tags: t.tags.join('; '), Notes: t.notes,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    download('ledger-filtered.xlsx', buf, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    setStatus(`Exported ${filtered.length} transactions to Excel.`);
+  };
+
+  return (
+    <div className="card" style={{ padding: '20px 22px', marginBottom: 14 }}>
+      <div className="card-title" style={{ fontSize: 15, marginBottom: 4 }}>Filtered export</div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 14 }}>Export exactly the transactions you filter for below — CSV or Excel.</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10, marginBottom: 14 }}>
+        <div>
+          <label className="field">From</label>
+          <input className="input" style={{ width: '100%' }} type="date" value={filter.start ?? ''} onChange={e => setFilter(f => ({ ...f, start: e.target.value || undefined }))} />
+        </div>
+        <div>
+          <label className="field">To</label>
+          <input className="input" style={{ width: '100%' }} type="date" value={filter.end ?? ''} onChange={e => setFilter(f => ({ ...f, end: e.target.value || undefined }))} />
+        </div>
+        <div>
+          <label className="field">Account</label>
+          <select className="input" style={{ width: '100%' }} value={filter.accountId ?? ''} onChange={e => setFilter(f => ({ ...f, accountId: e.target.value || undefined }))}>
+            <option value="">All accounts</option>
+            {state.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="field">Category</label>
+          <select className="input" style={{ width: '100%' }} value={filter.categoryId ?? ''} onChange={e => setFilter(f => ({ ...f, categoryId: e.target.value || undefined }))}>
+            <option value="">All categories</option>
+            {topCats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="field">Type</label>
+          <select className="input" style={{ width: '100%' }} value={filter.flow ?? 'all'} onChange={e => setFilter(f => ({ ...f, flow: e.target.value as TransactionFilter['flow'] }))}>
+            <option value="all">All</option>
+            <option value="spending">Spending</option>
+            <option value="income">Income</option>
+            <option value="transfers">Transfers</option>
+          </select>
+        </div>
+        <div>
+          <label className="field">Tag</label>
+          <input className="input" style={{ width: '100%' }} placeholder="e.g. Japan Trip" value={filter.tag ?? ''} onChange={e => setFilter(f => ({ ...f, tag: e.target.value || undefined }))} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>{filtered.length.toLocaleString()} transactions match</span>
+        <button className="btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportCSV} disabled={filtered.length === 0}>Export CSV</button>
+        <button className="btn-ghost" onClick={exportExcel} disabled={filtered.length === 0}>Export Excel</button>
+      </div>
+      {status && <div style={{ fontSize: 11.5, color: 'var(--green-conf)', marginTop: 10 }}>{status}</div>}
+    </div>
+  );
+}
+
+function TaxExportCard({ report }: { report: ReportData }) {
+  const { state } = useStore();
+  const hasAny = state.categories.some(c => c.taxDeductible);
+
+  const exportTax = () => {
+    const header = 'category,amount';
+    const esc = (s: string) => '"' + s.replace(/"/g, '""') + '"';
+    const rows = report.taxRows.map(r => [esc(r.category.name), r.amount.toFixed(2)].join(','));
+    const total = report.taxRows.reduce((a, r) => a + r.amount, 0);
+    rows.push([esc('Total'), total.toFixed(2)].join(','));
+    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `ledger-tax-deductible-${report.range.start}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <div className="card" style={{ padding: '20px 22px', marginBottom: 14 }}>
+      <div className="card-title" style={{ fontSize: 15, marginBottom: 4 }}>Tax-relevant export</div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 14 }}>
+        Category totals for whatever's marked tax-deductible (set the flag per category in Categories &amp; Rules), for the report period above — a simple handoff for your accountant, not tax-prep.
+      </div>
+      {!hasAny ? (
+        <div style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>No categories are marked tax-deductible yet. Go to Categories &amp; Rules to flag any that apply.</div>
+      ) : report.taxRows.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>No tax-deductible spend in the current report period.</div>
+      ) : (
+        <>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, marginBottom: 12 }}>
+            <tbody>
+              {report.taxRows.map(r => (
+                <tr key={r.category.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                  <td style={{ padding: '5px 0', color: 'var(--ink-3)' }}>{r.category.name}</td>
+                  <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 600 }}>{usd(r.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button className="btn-ghost" onClick={exportTax}>Export tax summary (CSV)</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ScheduledReportsCard() {
+  const { state, dispatch } = useStore();
+  const [status, setStatus] = useState<string | null>(null);
+
+  const pickFolder = async () => {
+    if (!window.ledgerApi) return;
+    const result = await window.ledgerApi.pickFolder();
+    if (result.ok && result.path) dispatch({ type: 'updateSettings', patch: { autoReportFolder: result.path } });
+  };
+
+  const generateNow = async () => {
+    if (!window.ledgerApi || !state.settings.autoReportFolder) return;
+    setStatus('Generating…');
+    const ym = currentYM();
+    const result = await window.ledgerApi.savePdfToFolder(state.settings.autoReportFolder, `ledger-monthly-summary-${ym}.pdf`);
+    if (result.ok) {
+      dispatch({ type: 'updateSettings', patch: { autoReportLastYM: ym } });
+      setStatus(`Saved to ${result.path}`);
+    } else {
+      setStatus('Could not save: ' + (result.error ?? 'unknown error'));
+    }
+  };
+
+  if (!isDesktop) return null;
+
+  return (
+    <div className="card" style={{ padding: '20px 22px' }}>
+      <div className="card-title" style={{ fontSize: 15, marginBottom: 4 }}>Scheduled reports</div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 14 }}>
+        When enabled, Ledger offers to save a Monthly Summary PDF to this folder the first time you open the app in a new month.
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--row-border)' }}>
+        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>Auto-generate monthly summary</div>
+        <Toggle on={state.settings.autoReportEnabled} onChange={v => dispatch({ type: 'updateSettings', patch: { autoReportEnabled: v } })} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--muted-2)', flex: 1 }}>{state.settings.autoReportFolder || 'No folder selected'}</span>
+        <button className="btn-ghost" onClick={pickFolder}>Choose folder…</button>
+        <button className="btn-ghost" onClick={generateNow} disabled={!state.settings.autoReportFolder}>Generate now</button>
+      </div>
+      {status && <div style={{ fontSize: 11.5, color: 'var(--green-conf)' }}>{status}</div>}
+    </div>
+  );
+}

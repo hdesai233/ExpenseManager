@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "expense-manager",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "expense-manager", "--", "--port", "5183", "--strictPort"],
+      "port": 5183
+    }
+  ]
+}
