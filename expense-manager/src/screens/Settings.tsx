@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 import { categorizeMerchants } from '../lib/api';
 import { isDesktop } from '../lib/persist';
-import { txnCategoryList, useStore } from '../store';
+import { accountTxnCount, txnCategoryList, useStore } from '../store';
 import type { Account, AccountType, AppData } from '../types';
 import { Modal, Toggle } from '../components/ui';
 
@@ -15,7 +16,19 @@ export default function Settings() {
   const [apiKeyMasked, setApiKeyMasked] = useState('');
   const [encState, setEncState] = useState<{ locked: boolean; encrypted: boolean } | null>(null);
   const [encModal, setEncModal] = useState<'enable' | 'change' | null>(null);
+  const [householdName, setHouseholdName] = useState(state.settings.householdName);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setHouseholdName(state.settings.householdName); }, [state.settings.householdName]);
+
+  const commitHouseholdName = () => {
+    const trimmed = householdName.trim();
+    if (trimmed && trimmed !== state.settings.householdName) {
+      dispatch({ type: 'updateSettings', patch: { householdName: trimmed } });
+    } else {
+      setHouseholdName(state.settings.householdName);
+    }
+  };
 
   const refreshApiKey = () => {
     if (window.ledgerApi) window.ledgerApi.secretsGetApiKeyMasked().then(setApiKeyMasked);
@@ -115,22 +128,57 @@ export default function Settings() {
         <div className="page-sub">Accounts, privacy, and your local data — nothing leaves this device by default</div>
       </div>
 
+      {/* household */}
+      <div className="card" style={{ padding: '20px 22px', marginBottom: 14 }}>
+        <div className="card-title" style={{ fontSize: 15, marginBottom: 6 }}>Household</div>
+        <label className="field">Household name</label>
+        <input
+          className="input"
+          style={{ width: '100%', maxWidth: 320 }}
+          value={householdName}
+          onChange={e => setHouseholdName(e.target.value)}
+          onBlur={commitHouseholdName}
+          onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+            if (e.key === 'Escape') { setHouseholdName(state.settings.householdName); e.currentTarget.blur(); }
+          }}
+        />
+        <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 10 }}>
+          Shown on the Dashboard greeting, the sidebar, and report headers.
+        </div>
+      </div>
+
       {/* accounts */}
       <div className="card" style={{ padding: '20px 22px', marginBottom: 14 }}>
         <div className="card-title" style={{ fontSize: 15, marginBottom: 16 }}>Accounts</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {state.accounts.map(a => (
-            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '12px 8px', borderTop: '1px solid #f2efe8' }}>
-              <span style={{ width: 34, height: 34, borderRadius: 9, background: a.color, opacity: .18, flex: 'none' }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>{a.name}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>
-                  {a.issuingBank} · {a.accountType.replace('_', ' ')}{a.lastFour ? ` · ••${a.lastFour}` : ''}
+          {state.accounts.map(a => {
+            const txnCount = accountTxnCount(state, a.id);
+            return (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '12px 8px', borderTop: '1px solid #f2efe8' }}>
+                <span style={{ width: 34, height: 34, borderRadius: 9, background: a.color, opacity: .18, flex: 'none' }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>{a.name}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>
+                    {a.issuingBank} · {a.accountType.replace('_', ' ')}{a.lastFour ? ` · ••${a.lastFour}` : ''}
+                  </div>
                 </div>
+                <button className="link-sm" style={{ fontSize: 12 }} onClick={() => setEditAccount(a)}>Edit</button>
+                <button
+                  className="link-sm"
+                  style={{ fontSize: 12, color: txnCount === 0 ? 'var(--red)' : 'var(--muted-3)', cursor: txnCount === 0 ? 'pointer' : 'default' }}
+                  disabled={txnCount > 0}
+                  title={txnCount > 0 ? `Has ${txnCount} transaction${txnCount > 1 ? 's' : ''} — delete or reassign them first` : undefined}
+                  onClick={() => {
+                    if (txnCount > 0) return;
+                    if (confirm(`Delete "${a.name}"? This can't be undone.`)) dispatch({ type: 'deleteAccount', accountId: a.id });
+                  }}
+                >
+                  Delete
+                </button>
               </div>
-              <button className="link-sm" style={{ fontSize: 12 }} onClick={() => setEditAccount(a)}>Edit</button>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 12 }}>
           New accounts are created during import — the issuing bank powers credit-card-payment detection.

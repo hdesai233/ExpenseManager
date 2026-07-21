@@ -17,6 +17,7 @@ type Action =
   | { type: 'addRule'; rule: Rule }
   | { type: 'deleteRule'; ruleId: string }
   | { type: 'updateAccount'; account: Account }
+  | { type: 'deleteAccount'; accountId: string }
   | { type: 'setTaxDeductible'; categoryId: string; taxDeductible: boolean }
   | { type: 'addCategory'; name: string; color: string; parentId: string | null }
   | { type: 'editCategory'; categoryId: string; patch: { name?: string; color?: string } }
@@ -114,6 +115,15 @@ function reducer(state: AppData, action: Action): AppData {
       return { ...state, rules: state.rules.filter(r => r.id !== action.ruleId) };
     case 'updateAccount':
       return { ...state, accounts: state.accounts.map(a => a.id === action.account.id ? action.account : a) };
+    case 'deleteAccount': {
+      if (state.transactions.some(t => t.accountId === action.accountId)) return state;
+      return {
+        ...state,
+        accounts: state.accounts.filter(a => a.id !== action.accountId),
+        batches: state.batches.filter(b => b.accountId !== action.accountId),
+        profiles: state.profiles.filter(p => p.accountId !== action.accountId),
+      };
+    }
     case 'setTaxDeductible':
       return { ...state, categories: state.categories.map(c => c.id === action.categoryId ? { ...c, taxDeductible: action.taxDeductible } : c) };
     case 'addCategory':
@@ -224,6 +234,10 @@ export function categoryColor(state: AppData, id: string | null): string {
 
 export function accountName(state: AppData, id: string): string {
   return state.accounts.find(a => a.id === id)?.name ?? id;
+}
+
+export function accountTxnCount(state: AppData, accountId: string): number {
+  return state.transactions.filter(t => t.accountId === accountId).length;
 }
 
 /** Display label for a transaction's category cell. */
