@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { addMonths, currentYM, monthShort, usd } from '../lib/format';
-import { categorySpend, forecastMonthSpend, monthlySeries, monthlySpend, topMerchants } from '../lib/analytics';
+import { addMonths, currentYM, monthShort, monthYearFull, usd } from '../lib/format';
+import { categorySpend, dailySpendByAccount, forecastMonthSpend, monthlySeries, monthlySpend, topMerchants } from '../lib/analytics';
 import { categoryName, useStore } from '../store';
-import { TrendChart } from '../components/ui';
+import { StackedBarChart, TrendChart } from '../components/ui';
 
 export default function Analytics() {
   const { state } = useStore();
@@ -47,6 +47,16 @@ export default function Analytics() {
 
   const cutOptions = state.categories.filter(c => !c.parentId && !['other', 'fees', 'housing'].includes(c.id));
 
+  // ---- daily spend by account, one month at a time ----
+  const [dailyYm, setDailyYm] = useState(ym);
+  const earliestYm = useMemo(
+    () => txns.reduce((min, t) => t.date.slice(0, 7) < min ? t.date.slice(0, 7) : min, ym),
+    [txns, ym],
+  );
+  const { days, series: accountSeries } = useMemo(() => dailySpendByAccount(txns, state.accounts, dailyYm), [txns, state.accounts, dailyYm]);
+  const dailyTotal = accountSeries.reduce((a, s) => a + s.values.reduce((x, y) => x + y, 0), 0);
+  const dailyLabels = days.map(String);
+
   return (
     <div className="page">
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 18 }}>
@@ -70,6 +80,49 @@ export default function Analytics() {
           </div>
         </div>
         <TrendChart width={720} height={300} series={trendPoints} compare={hasYoy ? yoy : undefined} forecastIndex={activeSeries.length - 1} yTicks />
+      </div>
+
+      <div className="card" style={{ padding: '20px 22px', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div className="card-title" style={{ fontSize: 15 }}>Daily spend by account</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              title="Previous month"
+              onClick={() => setDailyYm(addMonths(dailyYm, -1))}
+              disabled={dailyYm <= earliestYm}
+              style={{ width: 26, height: 26, borderRadius: 7, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--ink-4)', cursor: dailyYm <= earliestYm ? 'default' : 'pointer', opacity: dailyYm <= earliestYm ? .4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+            </button>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-4)', width: 118, textAlign: 'center' }}>{monthYearFull(dailyYm)}</span>
+            <button
+              title="Next month"
+              onClick={() => setDailyYm(addMonths(dailyYm, 1))}
+              disabled={dailyYm >= ym}
+              style={{ width: 26, height: 26, borderRadius: 7, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--ink-4)', cursor: dailyYm >= ym ? 'default' : 'pointer', opacity: dailyYm >= ym ? .4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+            </button>
+          </div>
+        </div>
+        {accountSeries.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '20px 0', textAlign: 'center' }}>No spending in {monthYearFull(dailyYm)}.</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 14 }}>{usd(dailyTotal)} total across {days.length} days</div>
+            <StackedBarChart
+              width={900}
+              height={220}
+              labels={dailyLabels}
+              series={accountSeries.map(s => ({ label: s.accountName, color: s.color, values: s.values }))}
+            />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 10 }}>
+              {accountSeries.map(s => (
+                <span key={s.accountId} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--muted)' }}>
+                  <span className="dot" style={{ width: 9, height: 9, background: s.color }} />{s.accountName}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>

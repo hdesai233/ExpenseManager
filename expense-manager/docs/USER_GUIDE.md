@@ -150,8 +150,9 @@ can spot ones you forgot about.
 across how many charges, how that compares with your recent average, the
 category that moved most, a projection for the month, your category
 breakdown, and what changed versus last month. **Analytics** goes deeper
-— spend by month, merchant breakdowns, and a what-if simulator for
-modelling a spending cut.
+— spend by month, a day-by-day breakdown of one month split by account
+(navigate with the arrows next to the month label), merchant breakdowns,
+and a what-if simulator for modelling a spending cut.
 
 ## 9. Reports & Export
 

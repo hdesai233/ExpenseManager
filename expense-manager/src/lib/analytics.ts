@@ -1,4 +1,4 @@
-import type { Category, Transaction } from '../types';
+import type { Account, Category, Transaction } from '../types';
 import { addMonths, currentYM, daysInMonth, todayISO, toYM } from './format';
 
 // ---- Aggregations, forecasting, recurring detection (§4.5, §4.8) ----
@@ -20,6 +20,41 @@ export function txnsInMonth(txns: Transaction[], ym: string): Transaction[] {
 
 export function monthlySpend(txns: Transaction[], ym: string): number {
   return txnsInMonth(txns, ym).reduce((a, t) => a + spendOf(t), 0);
+}
+
+export interface DailyAccountSeries { accountId: string; accountName: string; color: string; values: number[] }
+
+/**
+ * Day-by-day spend for one month, split out per account — a transaction only ever belongs to one
+ * account (unlike categories, accounts aren't split), so this is a straight bucket-and-sum.
+ * Accounts are returned biggest-total-first so the largest color anchors the bottom of the stack.
+ */
+export function dailySpendByAccount(txns: Transaction[], accounts: Account[], ym: string): { days: number[]; series: DailyAccountSeries[] } {
+  const dim = daysInMonth(ym);
+  const days = Array.from({ length: dim }, (_, i) => i + 1);
+  const byAccount = new Map<string, number[]>();
+
+  for (const t of txnsInMonth(txns, ym)) {
+    if (!isSpend(t)) continue;
+    const day = Number(t.date.slice(8, 10));
+    let values = byAccount.get(t.accountId);
+    if (!values) { values = new Array(dim).fill(0); byAccount.set(t.accountId, values); }
+    // Net spendOf in, not just positive charges — a merchant credit (refund) is a negative
+    // contribution and should reduce that day's total, the same way monthlySpend/categorySpend do.
+    values[day - 1] += spendOf(t);
+  }
+
+  const series = [...byAccount.entries()]
+    .map(([accountId, values]): DailyAccountSeries => {
+      const account = accounts.find(a => a.id === accountId);
+      return { accountId, accountName: account?.name ?? 'Unknown account', color: account?.color || '#cdc7bb', values };
+    })
+    // Drop an account whose month nets to ~0 (e.g. a refund with nothing else that month) —
+    // nothing meaningful to show, and StackedBarChart already skips individual negative segments.
+    .filter(s => s.values.reduce((a, b) => a + b, 0) > 0.005)
+    .sort((a, b) => b.values.reduce((x, y) => x + y, 0) - a.values.reduce((x, y) => x + y, 0));
+
+  return { days, series };
 }
 
 export interface CatSpend { category: Category; amount: number; pct: number }
