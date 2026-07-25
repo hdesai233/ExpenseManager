@@ -63,7 +63,6 @@ export interface Category {
   name: string;
   parentId: string | null;
   color: string;
-  taxDeductible?: boolean;
 }
 
 export type MatchType = 'exact' | 'contains' | 'regex';

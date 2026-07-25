@@ -373,7 +373,6 @@ export default function Reports() {
 
       <div className="no-print">
         <FilteredExportCard />
-        <TaxExportCard report={report} />
         <ScheduledReportsCard />
       </div>
 
@@ -651,53 +650,6 @@ function FilteredExportCard() {
         <button className="btn-ghost" onClick={exportExcel} disabled={filtered.length === 0}>Export Excel</button>
       </div>
       {status && <div style={{ fontSize: 11.5, color: 'var(--green-conf)', marginTop: 10 }}>{status}</div>}
-    </div>
-  );
-}
-
-function TaxExportCard({ report }: { report: ReportData }) {
-  const { state } = useStore();
-  const hasAny = state.categories.some(c => c.taxDeductible);
-
-  const exportTax = () => {
-    const header = 'category,amount';
-    const esc = (s: string) => '"' + s.replace(/"/g, '""') + '"';
-    const rows = report.taxRows.map(r => [esc(r.category.name), r.amount.toFixed(2)].join(','));
-    const total = report.taxRows.reduce((a, r) => a + r.amount, 0);
-    rows.push([esc('Total'), total.toFixed(2)].join(','));
-    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `ledger-tax-deductible-${report.range.start}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-
-  return (
-    <div className="card" style={{ padding: '20px 22px', marginBottom: 14 }}>
-      <div className="card-title" style={{ fontSize: 15, marginBottom: 4 }}>Tax-relevant export</div>
-      <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 14 }}>
-        Category totals for whatever's marked tax-deductible (set the flag per category in Categories &amp; Rules), for the report period above — a simple handoff for your accountant, not tax-prep.
-      </div>
-      {!hasAny ? (
-        <div style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>No categories are marked tax-deductible yet. Go to Categories &amp; Rules to flag any that apply.</div>
-      ) : report.taxRows.length === 0 ? (
-        <div style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>No tax-deductible spend in the current report period.</div>
-      ) : (
-        <>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, marginBottom: 12 }}>
-            <tbody>
-              {report.taxRows.map(r => (
-                <tr key={r.category.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
-                  <td style={{ padding: '5px 0', color: 'var(--ink-3)' }}>{r.category.name}</td>
-                  <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 600 }}>{usd(r.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <button className="btn-ghost" onClick={exportTax}>Export tax summary (CSV)</button>
-        </>
-      )}
     </div>
   );
 }

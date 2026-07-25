@@ -182,7 +182,6 @@ function loadSnapshot() {
   }));
   const categories = db.prepare('SELECT * FROM categories').all().map(r => ({
     id: r.id, name: r.name, parentId: r.parent_id, color: r.color,
-    taxDeductible: r.tax_deductible === null ? undefined : !!r.tax_deductible,
   }));
   const rules = db.prepare('SELECT * FROM rules').all().map(r => ({
     id: r.id, merchantPattern: r.merchant_pattern, matchType: r.match_type,
@@ -239,8 +238,10 @@ function saveSnapshot(data) {
     const insAccount = db.prepare('INSERT INTO accounts (id, name, issuing_bank, account_type, last_four, color) VALUES (?, ?, ?, ?, ?, ?)');
     for (const a of data.accounts) insAccount.run(a.id, a.name, a.issuingBank, a.accountType, a.lastFour ?? null, a.color);
 
-    const insCat = db.prepare('INSERT INTO categories (id, name, parent_id, color, tax_deductible) VALUES (?, ?, ?, ?, ?)');
-    for (const c of data.categories) insCat.run(c.id, c.name, c.parentId, c.color, c.taxDeductible === undefined ? null : (c.taxDeductible ? 1 : 0));
+    // tax_deductible stays in the table for existing rows (dropping a column is riskier than
+    // leaving an unused, always-NULL-going-forward one), but the app no longer reads or writes it.
+    const insCat = db.prepare('INSERT INTO categories (id, name, parent_id, color) VALUES (?, ?, ?, ?)');
+    for (const c of data.categories) insCat.run(c.id, c.name, c.parentId, c.color);
 
     const insRule = db.prepare('INSERT INTO rules (id, merchant_pattern, match_type, category_id, subcategory_id, created_from, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
     for (const r of data.rules) insRule.run(r.id, r.merchantPattern, r.matchType, r.categoryId, r.subcategoryId, r.createdFrom, r.createdAt);

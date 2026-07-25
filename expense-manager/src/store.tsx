@@ -34,7 +34,6 @@ type Action =
   | { type: 'deleteRule'; ruleId: string }
   | { type: 'updateAccount'; account: Account }
   | { type: 'deleteAccount'; accountId: string }
-  | { type: 'setTaxDeductible'; categoryId: string; taxDeductible: boolean }
   | { type: 'addCategory'; name: string; color: string; parentId: string | null; id?: string }
   | { type: 'editCategory'; categoryId: string; patch: { name?: string; color?: string } }
   | { type: 'deleteCategory'; categoryId: string; reassignTo: string | null }
@@ -182,8 +181,6 @@ function reducer(state: AppData, action: Action): AppData {
         profiles: state.profiles.filter(p => p.accountId !== action.accountId),
       };
     }
-    case 'setTaxDeductible':
-      return { ...state, categories: state.categories.map(c => c.id === action.categoryId ? { ...c, taxDeductible: action.taxDeductible } : c) };
     case 'addCategory':
       return categoryOps.addCategory(state, action.name, action.color, action.parentId, action.id);
     case 'editCategory':

@@ -230,7 +230,6 @@ export interface ReportData {
   merchants: MerchantAgg[];
   trend: Array<{ label: string; spend: number }>;
   transactions: Transaction[];
-  taxRows: Array<{ category: Category; amount: number }>;
   monthCount: number;
   generatedAt: string;
 }
@@ -259,10 +258,6 @@ export function buildReport(data: AppData, range: ReportRange, title: string): R
     spend: txns.filter(t => toYM(t.date) === ym).reduce((a, t) => a + spendOf(t), 0),
   }));
 
-  const taxRows = categories
-    .filter(c => c.category.taxDeductible)
-    .map(c => ({ category: c.category, amount: c.amount }));
-
   const categoryDetail = buildCategoryDetail(txns, data.categories, monthCount);
   const categoryTrend = buildCategoryTrend(txns, data.categories, months, categoryDetail, 6);
 
@@ -270,7 +265,6 @@ export function buildReport(data: AppData, range: ReportRange, title: string): R
     title, range, expense, transactionCount, dailyAverage,
     categories, categoryDetail, categoryTrend, merchants, trend,
     transactions: [...txns].sort((a, b) => a.date.localeCompare(b.date)),
-    taxRows,
     monthCount,
     generatedAt: todayISO(),
   };

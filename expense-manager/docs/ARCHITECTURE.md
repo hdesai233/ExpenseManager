@@ -330,8 +330,8 @@ amounts sum exactly to the transaction total before allowing a save.
 `lib/report.ts` is a pure data layer: `buildReport(data, range, title)`
 takes any `AppData` slice and a date range and returns a `ReportData`
 (summary totals, category breakdown, hierarchical category detail, top
-merchants, month-by-month trend, itemized transactions, tax-deductible
-rows). Four templates (`REPORT_TEMPLATES`) reuse the same function with
+merchants, month-by-month trend, itemized transactions). Four templates
+(`REPORT_TEMPLATES`) reuse the same function with
 different default section toggles and range logic — Monthly defaults to
 the current month, Annual to the current year, Expense Breakdown to a
 trailing window, Custom to a user-picked range.

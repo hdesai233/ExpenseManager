@@ -107,9 +107,8 @@ show up with a **review badge** on the Transactions nav item.
 subcategories nested underneath).
 
 - **Add**: create a top-level category or a subcategory under an
-  existing one; optionally mark it **tax-deductible** so it's pulled into
-  the tax-summary export.
-- **Edit**: rename or recolor a category, or toggle tax-deductible.
+  existing one.
+- **Edit**: rename or recolor a category.
 - **Merge**: fold one category into another — every transaction, split,
   and rule that referenced the old category is repointed to the target,
   and any of its subcategories move under the target too.
@@ -207,8 +206,6 @@ For each report you can toggle which sections are included, then:
 - **Export a chart image** (e.g. the category pie chart) as PNG/SVG.
 - **Filtered export**: build a custom transaction export (date range,
   account, category, tags) as CSV.
-- **Tax export**: a CSV of everything in your tax-deductible categories
-  for a given year, handed straight to your accountant or tax software.
 - **Scheduled reports**: enable "auto-generate monthly summary" in
   Settings and choose a folder — Ledger will remind you (banner at the
   top of the app) once a new month has started and offer to generate that

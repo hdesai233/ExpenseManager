@@ -51,7 +51,7 @@ export default function Categories() {
     <div className="page">
       <div style={{ marginBottom: 18 }}>
         <div className="page-title">Categories &amp; Rules</div>
-        <div className="page-sub">Add, rename, merge, or delete categories and subcategories — mark "Tax" to include one in Reports &amp; Export's tax-relevant export</div>
+        <div className="page-sub">Add, rename, merge, or delete categories and subcategories</div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14 }}>
         <div className="card" style={{ padding: '20px 22px' }}>
@@ -72,7 +72,6 @@ export default function Categories() {
                     onEdit={() => setModal({ kind: 'edit', category: c })}
                     onMerge={() => setModal({ kind: 'merge', category: c })}
                     onDelete={() => setModal({ kind: 'delete', category: c })}
-                    onToggleTax={v => dispatch({ type: 'setTaxDeductible', categoryId: c.id, taxDeductible: v })}
                   />
                   {subs.map(s => (
                     <CategoryRow
@@ -82,7 +81,6 @@ export default function Categories() {
                       onEdit={() => setModal({ kind: 'edit', category: s })}
                       onMerge={() => setModal({ kind: 'merge', category: s })}
                       onDelete={() => setModal({ kind: 'delete', category: s })}
-                      onToggleTax={v => dispatch({ type: 'setTaxDeductible', categoryId: s.id, taxDeductible: v })}
                     />
                   ))}
                 </div>
@@ -128,9 +126,9 @@ export default function Categories() {
   );
 }
 
-function CategoryRow({ category, count, indent, rowRef, highlighted, onAddSub, onEdit, onMerge, onDelete, onToggleTax }: {
+function CategoryRow({ category, count, indent, rowRef, highlighted, onAddSub, onEdit, onMerge, onDelete }: {
   category: Category; count: number; indent?: boolean; rowRef?: (el: HTMLDivElement | null) => void; highlighted?: boolean;
-  onAddSub?: () => void; onEdit: () => void; onMerge: () => void; onDelete: () => void; onToggleTax: (v: boolean) => void;
+  onAddSub?: () => void; onEdit: () => void; onMerge: () => void; onDelete: () => void;
 }) {
   const protectedCat = isProtectedCategory(category.id);
   return (
@@ -140,10 +138,6 @@ function CategoryRow({ category, count, indent, rowRef, highlighted, onAddSub, o
     }}>
       <span className="dot" style={{ width: indent ? 8 : 11, height: indent ? 8 : 11, background: category.color }} />
       <div className="ellip" style={{ flex: 1, fontSize: indent ? 12.5 : 13.5, fontWeight: indent ? 450 : 500, color: 'var(--ink-2)' }}>{category.name}</div>
-      <label title="Include in tax-relevant exports" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: category.taxDeductible ? 'var(--green)' : 'var(--muted-2)', cursor: 'pointer', flex: 'none' }}>
-        <input type="checkbox" checked={!!category.taxDeductible} onChange={e => onToggleTax(e.target.checked)} />
-        Tax
-      </label>
       <span style={{ fontSize: 10.5, color: 'var(--muted-2)', flex: 'none', width: 40, textAlign: 'right' }}>{count} txns</span>
       <div style={{ display: 'flex', gap: 2, flex: 'none' }}>
         {onAddSub && <IconButton title="Add subcategory" onClick={onAddSub}><path d="M12 5v14M5 12h14" /></IconButton>}
