@@ -178,6 +178,25 @@ function buildCategoryDetail(txns: Transaction[], categories: Category[], monthC
     .sort((a, b) => b.amount - a.amount);
 }
 
+/**
+ * Transactions contributing to a top-level category (drill-down from "Spending by category" /
+ * "Expenses by category"). Split-aware: a split transaction matches if *any* of its splits lands
+ * in the category, even though its own top-level categoryId/subcategoryId are null.
+ *
+ * `subcategoryId` narrows further: omit it to match the whole category, pass `null` to match only
+ * the direct/no-subcategory bucket, or pass a subcategory id to match just that subcategory.
+ */
+export function transactionsInCategory(
+  txns: Transaction[], categories: Category[], categoryId: string, subcategoryId?: string | null,
+): Transaction[] {
+  const narrowBySub = subcategoryId !== undefined;
+  return txns.filter(t => spendContributions(t).some(c => {
+    const { topId, subId } = resolveCategoryIds(c, categories);
+    if (topId !== categoryId) return false;
+    return !narrowBySub || subId === subcategoryId;
+  }));
+}
+
 export interface CategoryTrendSeries { category: Category; values: number[] }
 
 /** Per-month spend for the biggest categories, aligned index-for-index with `ReportData.trend`. */

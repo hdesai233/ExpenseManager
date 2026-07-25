@@ -317,6 +317,19 @@ No PDF library is bundled — this mirrors the requirements doc's stated
 technical approach of using the OS/browser's native print pipeline
 instead of a client-side PDF renderer.
 
+**Drill-down**: every row in "Spending by category" and "Expenses by
+category" is clickable and opens `CategoryDrilldownModal`, which reuses
+`report.categoryDetail` (already computed, not recalculated) for the
+subcategory chips and calls `transactionsInCategory()` to list the
+underlying transactions for the report's date range. That helper is
+split-aware — a split transaction matches if *any* of its splits lands in
+the category, the same contribution logic `buildCategoryDetail` already
+uses internally, just exposed for filtering rather than aggregation.
+Clicking a subcategory row opens straight into that subcategory; a `null`
+subcategory id (vs. `undefined`) specifically means the "no subcategory"
+bucket. The modal has its own CSV export scoped to whatever's currently
+filtered.
+
 ## 9. Build & packaging
 
 - `npm run dev` — Vite only, browser-fallback mode, hot reload, fastest

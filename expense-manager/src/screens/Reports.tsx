@@ -1,13 +1,14 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
-  applyTransactionFilter, buildReport, defaultRangeFor, REPORT_TEMPLATES,
-  type ReportData, type ReportSections, type ReportTemplateKey, type TransactionFilter,
+  applyTransactionFilter, buildReport, defaultRangeFor, REPORT_TEMPLATES, transactionsInCategory,
+  type CategoryDetailRow, type ReportData, type ReportSections, type ReportTemplateKey, type TransactionFilter,
 } from '../lib/report';
 import { currentYM, shortDate, usd, usd2 } from '../lib/format';
 import { isDesktop } from '../lib/persist';
 import { accountName, categoryName, useStore } from '../store';
-import { BarChartH, PieChartSvg, StackedBarChart, TrendChart, Toggle, downloadSvgAsImage } from '../components/ui';
+import { BarChartH, Modal, PieChartSvg, StackedBarChart, TrendChart, Toggle, downloadSvgAsImage } from '../components/ui';
+import type { AppData } from '../types';
 
 const CAT_COLORS = ['#1f6f5c', '#4a9d86', '#c8892b', '#86b8a5', '#d9a441', '#7c6f9c', '#b0736a', '#9aa06b', '#5a7f9c', '#cdc7bb'];
 
@@ -20,6 +21,7 @@ export default function Reports() {
   const [sections, setSections] = useState<ReportSections>(REPORT_TEMPLATES[0].defaultSections);
   const [expenseMonths, setExpenseMonths] = useState(6);
   const [pdfStatus, setPdfStatus] = useState<string | null>(null);
+  const [drilldown, setDrilldown] = useState<{ categoryId: string; subcategoryId?: string | null } | null>(null);
 
   const pieRef = useRef<HTMLDivElement>(null);
   const trendRef = useRef<HTMLDivElement>(null);
@@ -182,7 +184,13 @@ export default function Reports() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                     <tbody>
                       {report.categories.slice(0, 12).map((c, i) => (
-                        <tr key={c.category.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                        <tr
+                          key={c.category.id}
+                          className="hover-row"
+                          style={{ borderBottom: '1px solid var(--row-border)', cursor: 'pointer' }}
+                          title="View transactions in this category"
+                          onClick={() => setDrilldown({ categoryId: c.category.id })}
+                        >
                           <td style={{ padding: '5px 0', width: 16 }}><span className="dot" style={{ width: 9, height: 9, background: c.category.color || CAT_COLORS[i % CAT_COLORS.length] }} /></td>
                           <td style={{ padding: '5px 8px', color: 'var(--ink-3)' }}>{c.category.name}</td>
                           <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{Math.round(c.pct * 100)}%</td>
@@ -215,7 +223,12 @@ export default function Reports() {
                 <tbody>
                   {report.categoryDetail.map((r, i) => (
                     <Fragment key={r.category.id}>
-                      <tr style={{ borderBottom: '1px solid var(--row-border)' }}>
+                      <tr
+                        className="hover-row"
+                        style={{ borderBottom: '1px solid var(--row-border)', cursor: 'pointer' }}
+                        title="View transactions in this category"
+                        onClick={() => setDrilldown({ categoryId: r.category.id })}
+                      >
                         <td style={{ padding: '7px 0', color: 'var(--ink-2)', fontWeight: 600 }}>
                           <span className="dot" style={{ width: 9, height: 9, background: catColor(r, i), marginRight: 8 }} />
                           {r.category.name}
@@ -227,7 +240,13 @@ export default function Reports() {
                       </tr>
                       {/* a lone "(no subcategory)" row just restates its parent — only break out real splits */}
                       {!(r.subs.length === 1 && r.subs[0].direct) && r.subs.map(s => (
-                        <tr key={s.category.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                        <tr
+                          key={s.category.id}
+                          className="hover-row"
+                          style={{ borderBottom: '1px solid var(--row-border)', cursor: 'pointer' }}
+                          title="View transactions in this subcategory"
+                          onClick={() => setDrilldown({ categoryId: r.category.id, subcategoryId: s.direct ? null : s.category.id })}
+                        >
                           <td style={{ padding: '5px 0 5px 22px', color: s.direct ? 'var(--muted-2)' : 'var(--ink-3)', fontStyle: s.direct ? 'italic' : undefined }}>
                             {s.category.name}
                           </td>
@@ -328,6 +347,16 @@ export default function Reports() {
         <TaxExportCard report={report} />
         <ScheduledReportsCard />
       </div>
+
+      {drilldown && (
+        <CategoryDrilldownModal
+          report={report}
+          state={state}
+          categoryId={drilldown.categoryId}
+          initialSubcategoryId={drilldown.subcategoryId}
+          onClose={() => setDrilldown(null)}
+        />
+      )}
     </div>
   );
 }
@@ -338,6 +367,133 @@ function SummaryTile({ label, value, color }: { label: string; value: string; co
       <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>{label}</div>
       <div style={{ fontSize: 21, fontWeight: 300, color: color ?? 'var(--ink)', marginTop: 4 }}>{value}</div>
     </div>
+  );
+}
+
+/** Drill-down from a category (or subcategory) row: its breakdown plus every underlying transaction. */
+function CategoryDrilldownModal({ report, state, categoryId, initialSubcategoryId, onClose }: {
+  report: ReportData; state: AppData; categoryId: string; initialSubcategoryId?: string | null; onClose: () => void;
+}) {
+  const detail: CategoryDetailRow | undefined = report.categoryDetail.find(r => r.category.id === categoryId);
+  // undefined = all subcategories, null = the "no subcategory" bucket, string = one specific subcategory.
+  const [subFilter, setSubFilter] = useState<string | null | undefined>(initialSubcategoryId);
+
+  const txns = useMemo(
+    () => transactionsInCategory(report.transactions, state.categories, categoryId, subFilter)
+      .sort((a, b) => b.date.localeCompare(a.date)),
+    [report.transactions, state.categories, categoryId, subFilter],
+  );
+  const shownTotal = txns.reduce((a, t) => a + -t.amount, 0);
+
+  const hasRealSubs = !!detail && !(detail.subs.length === 1 && detail.subs[0].direct);
+  const activeSubLabel = subFilter === undefined
+    ? null
+    : detail?.subs.find(s => (s.direct ? s.category.id === `${categoryId}:direct` : s.category.id === subFilter))?.category.name;
+
+  const exportCSV = () => {
+    const header = 'date,merchant,raw_description,amount,account,tags,notes';
+    const esc = (s: string) => '"' + s.replace(/"/g, '""') + '"';
+    const rows = txns.map(t => [
+      t.date, esc(t.merchantNormalized), esc(t.merchantRaw), t.amount.toFixed(2),
+      esc(state.accounts.find(a => a.id === t.accountId)?.name ?? ''), esc(t.tags.join(';')), esc(t.notes),
+    ].join(','));
+    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `ledger-${(detail?.category.name ?? categoryId).toLowerCase().replace(/\s+/g, '-')}-${report.range.start}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <Modal
+      title={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span className="dot" style={{ width: 11, height: 11, background: detail?.category.color ?? '#cdc7bb' }} />
+          {detail?.category.name ?? 'Category'}{activeSubLabel ? <> · {activeSubLabel}</> : null}
+        </div>
+      }
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>{report.range.label}</span>
+          <button className="btn-ghost" onClick={exportCSV} disabled={txns.length === 0}>Export CSV</button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+        <div>
+          <div className="kicker">Total</div>
+          <div className="big-num" style={{ margin: '4px 0' }}>{usd(shownTotal)}</div>
+        </div>
+        <div>
+          <div className="kicker">Transactions</div>
+          <div className="big-num" style={{ margin: '4px 0' }}>{txns.length}</div>
+        </div>
+        {detail && subFilter === undefined && (
+          <div>
+            <div className="kicker">Share of total spend</div>
+            <div className="big-num" style={{ margin: '4px 0' }}>{Math.round(detail.pct * 100)}%</div>
+          </div>
+        )}
+      </div>
+
+      {hasRealSubs && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+          <button
+            className={'chip clickable' + (subFilter === undefined ? ' active' : '')}
+            style={{ border: subFilter === undefined ? '1px solid var(--green-2)' : undefined }}
+            onClick={() => setSubFilter(undefined)}
+          >
+            All
+          </button>
+          {detail!.subs.map(s => {
+            const value = s.direct ? null : s.category.id;
+            const active = subFilter === value;
+            return (
+              <button
+                key={s.category.id}
+                className={'chip clickable' + (active ? ' active' : '')}
+                style={{ border: active ? '1px solid var(--green-2)' : undefined, fontStyle: s.direct ? 'italic' : undefined }}
+                onClick={() => setSubFilter(value)}
+              >
+                {s.category.name} · {usd(s.amount)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--soft-border)' }}>
+              <Th align="left">Date</Th>
+              <Th align="left">Merchant</Th>
+              <Th align="left">Account</Th>
+              <Th align="right">Amount</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {txns.length === 0 && (
+              <tr><td colSpan={4} style={{ padding: '20px 0', textAlign: 'center', color: 'var(--muted-2)' }}>No transactions.</td></tr>
+            )}
+            {txns.map(t => (
+              <tr key={t.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                <td style={{ padding: '6px 0', color: 'var(--muted)' }}>{shortDate(t.date)}</td>
+                <td style={{ padding: '6px 8px', color: 'var(--ink-3)' }}>
+                  {t.merchantNormalized}
+                  {t.splits && t.splits.length > 1 && <span style={{ marginLeft: 6, fontSize: 10.5, color: 'var(--muted-3)' }}>split</span>}
+                </td>
+                <td style={{ padding: '6px 8px', color: 'var(--muted-2)' }}>{accountName(state, t.accountId)}</td>
+                <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, color: 'var(--ink)' }}>{usd2(t.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
   );
 }
 

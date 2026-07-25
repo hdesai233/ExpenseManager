@@ -168,6 +168,10 @@ always match what you see elsewhere in the app:
 
 For each report you can toggle which sections are included, then:
 
+- **Drill down**: click any category (or subcategory) in "Spending by
+  category" or "Expenses by category" to open a breakdown of exactly
+  which transactions make up that number — filterable by subcategory,
+  with its own CSV export.
 - **Export as PDF** (desktop app only) or **Print** (works in browser
   mode too, via your browser's print-to-PDF).
 - **Export a chart image** (e.g. the category pie chart) as PNG/SVG.
