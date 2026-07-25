@@ -191,6 +191,10 @@ For each report you can toggle which sections are included, then:
   category" or "Expenses by category" to open a breakdown of exactly
   which transactions make up that number — filterable by subcategory,
   with its own CSV export.
+- **Hover for exact values**: every point on "Monthly spend trend" (and
+  the other trend charts throughout the app) shows the precise month and
+  amount on hover — handy on Annual / Year-in-Review, where the line
+  alone only gives you the shape.
 - **Export as PDF** (desktop app only) or **Print** (works in browser
   mode too, via your browser's print-to-PDF).
 - **Export a chart image** (e.g. the category pie chart) as PNG/SVG.

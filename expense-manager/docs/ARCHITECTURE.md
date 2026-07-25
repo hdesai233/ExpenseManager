@@ -357,6 +357,22 @@ day" and filters `state.transactions` directly by exact date — no
 Report-style pre-aggregated data to reuse here, since this chart isn't
 built from a `ReportData`.
 
+`TrendChart` (also `components/ui.tsx`, used by Dashboard, Analytics,
+Trends, and Reports) shows the exact value on hover for every point,
+via an invisible, generously-sized (`r={10}`) `<circle>` per point with
+a native SVG `<title>` child — a browser tooltip with zero extra state
+or hover-tracking JS, the same technique `title` attributes already use
+elsewhere in the app. The one subtlety: a point at exactly
+`forecastIndex` (`fi`) is the last *actual* value, not a projection — the
+dashed forecast segment starts *from* it, but the point itself is drawn
+in the solid/actual style (the filled circle a few lines above). The
+tooltip logic must use `i > fi`, not `i >= fi`, to label only points
+*after* that anchor as "(projected)" — an off-by-one that briefly shipped
+and mislabeled the current month's actual total as a projection until
+caught by checking Analytics' forecast chart specifically (Reports'
+"Monthly spend trend" never has a forecast tail, so it wouldn't have
+surfaced there).
+
 ## 9. Build & packaging
 
 - `npm run dev` — Vite only, browser-fallback mode, hot reload, fastest

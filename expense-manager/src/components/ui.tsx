@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { Transaction } from '../types';
 import { REVIEW_THRESHOLD } from '../lib/categorize';
+import { usd } from '../lib/format';
 
 export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -109,6 +110,15 @@ export function TrendChart({ width, height, series, compare, forecastIndex, yTic
       )}
       {series.map((s, i) => (
         <text key={'l' + i} x={xAt(i)} y={height - 8} fill="#a09c92" fontSize="10.5" textAnchor="middle">{s.label}</text>
+      ))}
+      {/* Invisible, generously-sized hover targets — a native <title> gives a tooltip with the
+          exact value for free, with no extra state or hover-tracking JS. */}
+      {series.map((s, i) => s.value === null ? null : (
+        // i === fi is the last *actual* point — it's the anchor the dashed forecast segment
+        // starts from (drawn as the solid filled dot above), not itself a projection.
+        <circle key={'h' + i} cx={xAt(i)} cy={yAt(s.value)} r={10} fill="transparent" style={{ cursor: 'default' }}>
+          <title>{`${s.label}: ${usd(s.value)}${i > fi ? ' (projected)' : ''}`}</title>
+        </circle>
       ))}
     </svg>
   );
