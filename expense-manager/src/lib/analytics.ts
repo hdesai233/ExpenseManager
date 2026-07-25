@@ -102,11 +102,11 @@ export function forecastMonthSpend(txns: Transaction[], ym: string, categoryId?:
 
 export interface MonthPoint { ym: string; spend: number; income: number }
 
-export function monthlySeries(txns: Transaction[], months: number): MonthPoint[] {
-  const now = currentYM();
+export function monthlySeries(txns: Transaction[], months: number, anchorYm?: string): MonthPoint[] {
+  const anchor = anchorYm ?? currentYM();
   const out: MonthPoint[] = [];
   for (let i = months - 1; i >= 0; i--) {
-    const ym = addMonths(now, -i);
+    const ym = addMonths(anchor, -i);
     out.push({ ym, spend: monthlySpend(txns, ym), income: monthlyIncome(txns, ym) });
   }
   return out;

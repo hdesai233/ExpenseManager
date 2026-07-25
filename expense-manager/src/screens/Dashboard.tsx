@@ -1,14 +1,31 @@
+import { useMemo, useState } from 'react';
 import { budgetPacing, forecastMonthSpend, monthlyIncome, monthlySeries, monthlySpend, spendByCategory } from '../lib/analytics';
 import { needsReview } from '../lib/categorize';
-import { currentYM, monthFull, monthLabel, monthShort, shortDate, signedUsd2, usd } from '../lib/format';
+import { addMonths, currentYM, monthShort, monthYearFull, shortDate, signedUsd2, usd } from '../lib/format';
 import { accountName, categoryColor, txnCategoryLabel, useStore } from '../store';
 import type { ViewKey } from '../types';
 import { Donut, TrendChart } from '../components/ui';
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
   const { state, dispatch } = useStore();
-  const ym = currentYM();
+  const [ym, setYm] = useState(currentYM());
+  const isCurrentMonth = ym === currentYM();
   const txns = state.transactions;
+
+  const earliestYm = useMemo(() => txns.reduce((min, t) => t.date.slice(0, 7) < min ? t.date.slice(0, 7) : min, currentYM()), [txns]);
+  const years = useMemo(() => {
+    const start = Number(earliestYm.slice(0, 4));
+    const end = Number(currentYM().slice(0, 4));
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  }, [earliestYm]);
+  const [selYear, selMonth] = ym.split('-');
+
+  const jumpTo = (year: string, month: string) => {
+    const next = `${year}-${month}`;
+    setYm(next > currentYM() ? currentYM() : next);
+  };
 
   const spent = monthlySpend(txns, ym);
   const income = monthlyIncome(txns, ym);
@@ -20,13 +37,12 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
   const cats = spendByCategory(txns, state.categories, ym);
   const pacing = budgetPacing(state.budgets, txns, state.categories, ym).slice(0, 5);
   const review = txns.filter(needsReview).sort((a, b) => b.date.localeCompare(a.date));
-  const recent = [...txns].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0, 6);
+  const recent = [...txns].filter(t => t.date.slice(0, 7) === ym).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0, 6);
 
-  const series = monthlySeries(txns, 6);
-  const trendPoints = [
-    ...series.map(m => ({ label: monthShort(m.ym), value: m.spend })),
-    { label: 'proj', value: projected },
-  ];
+  const series = monthlySeries(txns, 6, ym);
+  const trendPoints = isCurrentMonth
+    ? [...series.map(m => ({ label: monthShort(m.ym), value: m.spend })), { label: 'proj', value: projected }]
+    : series.map(m => ({ label: monthShort(m.ym), value: m.spend }));
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -36,17 +52,39 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 22 }}>
         <div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 3 }}>{greeting}, {state.settings.householdName}</div>
-          <div className="page-title">Here's your {monthFull(ym)} so far</div>
+          <div className="page-title">
+            {isCurrentMonth ? `Here's your ${monthYearFull(ym)} so far` : `Here's how ${monthYearFull(ym)} went`}
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 9, fontSize: 13, fontWeight: 600, color: 'var(--ink-4)' }}>
-          {monthLabel(ym)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            title="Previous month"
+            onClick={() => setYm(addMonths(ym, -1))}
+            disabled={ym <= earliestYm}
+            style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--ink-4)', cursor: ym <= earliestYm ? 'default' : 'pointer', opacity: ym <= earliestYm ? .4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+          </button>
+          <select className="input" value={selMonth} onChange={e => jumpTo(selYear, e.target.value)} style={{ height: 32, fontSize: 13, fontWeight: 600, padding: '0 8px' }}>
+            {MONTH_NAMES.map((m, i) => <option key={m} value={String(i + 1).padStart(2, '0')}>{m}</option>)}
+          </select>
+          <select className="input" value={selYear} onChange={e => jumpTo(e.target.value, selMonth)} style={{ height: 32, fontSize: 13, fontWeight: 600, padding: '0 8px' }}>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <button
+            title="Next month"
+            onClick={() => setYm(addMonths(ym, 1))}
+            disabled={isCurrentMonth}
+            style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--ink-4)', cursor: isCurrentMonth ? 'default' : 'pointer', opacity: isCurrentMonth ? .4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+          {!isCurrentMonth && <button className="link-sm" style={{ fontSize: 12, marginLeft: 4 }} onClick={() => setYm(currentYM())}>Today</button>}
         </div>
       </div>
 
       {/* stat cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 14 }}>
         <div className="card" style={{ padding: '16px 17px' }}>
-          <div className="kicker">Spent this month</div>
+          <div className="kicker">{isCurrentMonth ? 'Spent this month' : 'Spent'}</div>
           <div className="big-num" style={{ margin: '9px 0 3px' }}>{usd(spent)}</div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 9 }}>
             of {usd(totalBudget)} budget · {totalBudget ? Math.round(spent / totalBudget * 100) : 0}%
@@ -65,17 +103,29 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
           <div className="big-num" style={{ margin: '9px 0 3px', color: saved >= 0 ? 'var(--green-ok)' : 'var(--red)' }}>
             {saved >= 0 ? '+' : ''}{usd(saved)}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{income ? Math.round(saved / income * 100) : 0}% savings rate this month</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{income ? Math.round(saved / income * 100) : 0}% savings rate{isCurrentMonth ? ' this month' : ''}</div>
         </div>
-        <div style={{ background: '#fdf7ee', border: '1px solid #ecdcbf', borderRadius: 14, padding: '16px 17px' }}>
-          <div className="kicker" style={{ color: 'var(--amber-text)' }}>Projected month-end</div>
-          <div className="big-num" style={{ margin: '9px 0 3px', color: 'var(--amber-deep)' }}>~{usd(projected)}</div>
-          <div style={{ fontSize: 12, color: 'var(--amber-text)', display: 'flex', alignItems: 'center', gap: 5 }}>
-            {!confident ? 'Low confidence — under 3 months of history'
-              : overBudget > 0 ? <>⚠ On pace to exceed budget by {usd(overBudget)}</>
-              : 'On pace to stay within budget'}
+        {isCurrentMonth ? (
+          <div style={{ background: '#fdf7ee', border: '1px solid #ecdcbf', borderRadius: 14, padding: '16px 17px' }}>
+            <div className="kicker" style={{ color: 'var(--amber-text)' }}>Projected month-end</div>
+            <div className="big-num" style={{ margin: '9px 0 3px', color: 'var(--amber-deep)' }}>~{usd(projected)}</div>
+            <div style={{ fontSize: 12, color: 'var(--amber-text)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              {!confident ? 'Low confidence — under 3 months of history'
+                : overBudget > 0 ? <>⚠ On pace to exceed budget by {usd(overBudget)}</>
+                : 'On pace to stay within budget'}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="card" style={{ padding: '16px 17px' }}>
+            <div className="kicker">Budget result</div>
+            <div className="big-num" style={{ margin: '9px 0 3px', color: overBudget > 0 ? 'var(--red)' : 'var(--green-ok)' }}>
+              {overBudget > 0 ? `+${usd(overBudget)}` : usd(overBudget)}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+              {totalBudget === 0 ? 'No budget set' : overBudget > 0 ? 'Over budget' : 'Within budget'}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* donut + budgets on pace */}
@@ -83,7 +133,7 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <div className="card-title">Spending by category</div>
-            <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>This month</div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>{isCurrentMonth ? 'This month' : monthYearFull(ym)}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             <Donut
@@ -143,17 +193,19 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 14 }}>
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <div className="card-title">Spend trend &amp; forecast</div>
+            <div className="card-title">Spend trend{isCurrentMonth ? ' & forecast' : ''}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)' }}>
                 <span style={{ width: 14, height: 2, background: 'var(--green)', borderRadius: 2 }} />Actual
               </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)' }}>
-                <span style={{ width: 14, height: 0, borderTop: '2px dashed var(--amber)' }} />Forecast
-              </span>
+              {isCurrentMonth && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)' }}>
+                  <span style={{ width: 14, height: 0, borderTop: '2px dashed var(--amber)' }} />Forecast
+                </span>
+              )}
             </div>
           </div>
-          <TrendChart width={560} height={190} series={trendPoints} forecastIndex={series.length - 1} />
+          <TrendChart width={560} height={190} series={trendPoints} forecastIndex={isCurrentMonth ? series.length - 1 : trendPoints.length} />
         </div>
 
         <div className="card">
@@ -209,10 +261,11 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
       {/* recent transactions */}
       <div className="card" style={{ marginTop: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div className="card-title">Recent transactions</div>
+          <div className="card-title">{isCurrentMonth ? 'Recent transactions' : `Transactions in ${monthYearFull(ym)}`}</div>
           <button className="link-sm" onClick={() => go('transactions')}>See all</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {recent.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>No transactions this month.</div>}
           {recent.map(t => (
             <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 2px', borderTop: '1px solid #f2efe8' }}>
               <span className="dot" style={{ width: 9, height: 9, background: t.flowType === 'transfer' ? '#b6b2a8' : categoryColor(state, t.categoryId) }} />

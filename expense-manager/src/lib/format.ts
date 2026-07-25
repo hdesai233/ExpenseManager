@@ -33,6 +33,11 @@ export function monthFull(ym: string): string {
   return MONTHS_FULL[m - 1];
 }
 
+export function monthYearFull(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return `${MONTHS_FULL[m - 1]} ${y}`;
+}
+
 export function monthShort(ym: string): string {
   const [, m] = ym.split('-').map(Number);
   return MONTHS[m - 1];
