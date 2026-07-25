@@ -165,10 +165,14 @@ For each report you can toggle which sections are included, then:
 - **Household name** and **accounts** (add/edit bank & credit card
   accounts — nickname, issuing bank, type, last 4 digits, color).
 - **AI categorization** — enable/disable the API fallback, pick your
-  model provider (Claude or Gemini), and manage that provider's API key
+  model provider (Claude or Gemini), pick the **model** for it, and
+  manage that provider's API key
   (desktop app only; stored in the OS keychain, shown masked once
   saved). Get a key from `console.anthropic.com` for Claude or
-  `aistudio.google.com/apikey` for Gemini. "Categorize unmatched
+  `aistudio.google.com/apikey` for Gemini. If a call ever fails saying
+  the model isn't available, the provider has retired that model id —
+  type a current one into the **Model** field; no update needed.
+  "Categorize unmatched
   merchants now" runs a one-off pass against the selected provider.
 - **Database encryption** (desktop app only) — enable a passphrase to
   encrypt your database file whenever the app is closed. When enabled,

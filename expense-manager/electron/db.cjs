@@ -135,6 +135,17 @@ function migrate() {
   // Future migrations needing real column changes: read current version, apply ALTER TABLE steps in order, bump schema_meta.
 }
 
+/** Tolerant JSON-object read for settings values written by a newer/older build. */
+function parseJsonObject(raw) {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function isEmpty() {
   const row = db.prepare('SELECT COUNT(*) as n FROM accounts').get();
   return row.n === 0;
@@ -197,6 +208,7 @@ function loadSnapshot() {
   const settings = {
     apiFallbackEnabled: settingsMap.apiFallbackEnabled === '1',
     aiProvider: settingsMap.aiProvider === 'gemini' ? 'gemini' : 'anthropic',
+    aiModels: parseJsonObject(settingsMap.aiModels),
     householdName: settingsMap.householdName ?? 'Household',
     autoReportEnabled: settingsMap.autoReportEnabled === '1',
     autoReportFolder: settingsMap.autoReportFolder ?? '',
@@ -247,6 +259,7 @@ function saveSnapshot(data) {
     const insSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
     insSetting.run('apiFallbackEnabled', data.settings.apiFallbackEnabled ? '1' : '0');
     insSetting.run('aiProvider', data.settings.aiProvider === 'gemini' ? 'gemini' : 'anthropic');
+    insSetting.run('aiModels', JSON.stringify(data.settings.aiModels ?? {}));
     insSetting.run('householdName', data.settings.householdName ?? '');
     insSetting.run('autoReportEnabled', data.settings.autoReportEnabled ? '1' : '0');
     insSetting.run('autoReportFolder', data.settings.autoReportFolder ?? '');

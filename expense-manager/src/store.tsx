@@ -151,6 +151,7 @@ function withSettingsDefaults(data: AppData): AppData {
   if (settings.aiProvider !== 'anthropic' && settings.aiProvider !== 'gemini') {
     settings.aiProvider = 'anthropic';
   }
+  if (!settings.aiModels || typeof settings.aiModels !== 'object') settings.aiModels = {};
   return { ...data, settings };
 }
 
@@ -167,7 +168,7 @@ const EMPTY: AppData = {
   schemaVersion: 1, accounts: [], transactions: [], categories: [], rules: [],
   batches: [], profiles: [],
   settings: {
-    apiFallbackEnabled: false, aiProvider: 'anthropic', householdName: '',
+    apiFallbackEnabled: false, aiProvider: 'anthropic', aiModels: {}, householdName: '',
     autoReportEnabled: false, autoReportFolder: '', autoReportLastYM: '',
   },
 };

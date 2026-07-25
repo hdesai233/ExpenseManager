@@ -223,6 +223,15 @@ UI copy should keep saying so rather than overclaiming.
    type names and `nullable` instead of union types). Both funnel through
    `normalizeResults`, so the rest of the app never learns which provider
    answered. Only merchant names are sent in either case.
+
+   **Model ids are not hardcoded-and-forgotten.** Both providers retire
+   ids on their own schedule (this bit us once: a default went two
+   generations stale and every call 404'd). `AI_PROVIDERS` holds a
+   built-in default plus known alternates, and `settings.aiModels` stores
+   an optional per-provider override edited in Settings — so moving to a
+   newer model is a text field, not a rebuild. `modelFor()` resolves
+   override-then-default, and a 404 from Gemini is rewritten to name the
+   offending model and point at that field.
 4. **Learning**: any manual categorization (initial confirm, review-queue
    correction, or accepting an AI suggestion) calls `learnRule`, which
    creates or updates an `exact`-match user rule for that merchant, so the

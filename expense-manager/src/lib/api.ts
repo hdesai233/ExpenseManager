@@ -18,7 +18,10 @@ export interface ApiCategorization {
 export interface AiProviderDef {
   key: AiProvider;
   label: string;
+  /** Built-in default. Overridable per provider in Settings — see `modelFor`. */
   model: string;
+  /** Other known-good ids, offered in Settings so a stale default isn't a code change. */
+  alternateModels: string[];
   keyPlaceholder: string;
   keyUrl: string;
 }
@@ -28,13 +31,15 @@ export const AI_PROVIDERS: AiProviderDef[] = [
     key: 'anthropic',
     label: 'Claude',
     model: 'claude-opus-4-8',
+    alternateModels: ['claude-sonnet-5', 'claude-haiku-4-5-20251001'],
     keyPlaceholder: 'sk-ant-…',
     keyUrl: 'console.anthropic.com',
   },
   {
     key: 'gemini',
     label: 'Gemini',
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.6-flash',
+    alternateModels: ['gemini-3.5-flash-lite'],
     keyPlaceholder: 'AIza…',
     keyUrl: 'aistudio.google.com/apikey',
   },
@@ -42,6 +47,15 @@ export const AI_PROVIDERS: AiProviderDef[] = [
 
 export function providerDef(provider: AiProvider): AiProviderDef {
   return AI_PROVIDERS.find(p => p.key === provider) ?? AI_PROVIDERS[0];
+}
+
+/**
+ * The model to actually call: a user override from Settings if present, else the built-in default.
+ * Providers retire model ids on their own schedule, so this is deliberately editable at runtime —
+ * a newer model shouldn't require rebuilding the app.
+ */
+export function modelFor(provider: AiProvider, overrides?: Partial<Record<AiProvider, string>>): string {
+  return overrides?.[provider]?.trim() || providerDef(provider).model;
 }
 
 const SYSTEM_PROMPT =
@@ -93,15 +107,17 @@ export async function categorizeMerchants(
   apiKey: string,
   merchants: string[],
   categories: Category[],
+  model?: string,
 ): Promise<ApiCategorization[]> {
+  const resolved = model?.trim() || providerDef(provider).model;
   return provider === 'gemini'
-    ? categorizeWithGemini(apiKey, merchants, categories)
-    : categorizeWithClaude(apiKey, merchants, categories);
+    ? categorizeWithGemini(apiKey, merchants, categories, resolved)
+    : categorizeWithClaude(apiKey, merchants, categories, resolved);
 }
 
 // ---- Anthropic / Claude ----
 
-async function categorizeWithClaude(apiKey: string, merchants: string[], categories: Category[]): Promise<ApiCategorization[]> {
+async function categorizeWithClaude(apiKey: string, merchants: string[], categories: Category[], model: string): Promise<ApiCategorization[]> {
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
 
   const schema = {
@@ -127,7 +143,7 @@ async function categorizeWithClaude(apiKey: string, merchants: string[], categor
   };
 
   const response = await client.messages.create({
-    model: providerDef('anthropic').model,
+    model,
     max_tokens: 4096,
     system: SYSTEM_PROMPT,
     output_config: { format: { type: 'json_schema', schema } },
@@ -143,9 +159,7 @@ async function categorizeWithClaude(apiKey: string, merchants: string[], categor
 // Called over plain REST rather than pulling in a second SDK: one fetch, no bundle cost, and
 // no browser-environment escape hatch to opt into. The key travels in a header, never the URL.
 
-async function categorizeWithGemini(apiKey: string, merchants: string[], categories: Category[]): Promise<ApiCategorization[]> {
-  const model = providerDef('gemini').model;
-
+async function categorizeWithGemini(apiKey: string, merchants: string[], categories: Category[], model: string): Promise<ApiCategorization[]> {
   // Gemini's responseSchema is an OpenAPI subset: uppercase type names, `nullable` instead of
   // a union type, and no `additionalProperties`.
   const responseSchema = {
@@ -188,6 +202,11 @@ async function categorizeWithGemini(apiKey: string, merchants: string[], categor
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     const message = body?.error?.message ?? `${response.status} ${response.statusText}`;
+    // Google retires model ids on its own schedule; make that case point at the fix rather than
+    // leaving the user staring at a raw 404.
+    if (response.status === 404) {
+      throw new Error(`Model "${model}" isn't available to this API key. Set a current model in Settings → Model. (${message})`);
+    }
     throw new Error(message);
   }
 

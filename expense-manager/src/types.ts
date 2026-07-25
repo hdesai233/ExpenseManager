@@ -108,6 +108,12 @@ export type AiProvider = 'anthropic' | 'gemini';
 export interface Settings {
   apiFallbackEnabled: boolean;
   aiProvider: AiProvider;
+  /**
+   * Per-provider model id override; a missing/empty entry means "use the built-in default".
+   * Providers retire model ids on their own schedule, so this is editable at runtime — moving to
+   * a newer model shouldn't require rebuilding the app.
+   */
+  aiModels: Partial<Record<AiProvider, string>>;
   householdName: string;
   /** §4.9 scheduled reports: auto-generate a monthly summary PDF on first launch of a new month. */
   autoReportEnabled: boolean;

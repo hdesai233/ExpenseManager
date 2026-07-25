@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { AI_PROVIDERS, categorizeMerchants, providerDef } from '../lib/api';
+import { AI_PROVIDERS, categorizeMerchants, modelFor, providerDef } from '../lib/api';
 import { isDesktop } from '../lib/persist';
 import { accountTxnCount, txnCategoryList, useStore } from '../store';
 import type { Account, AccountType, AiProvider, AppData } from '../types';
@@ -32,6 +32,15 @@ export default function Settings() {
 
   const provider = state.settings.aiProvider;
   const providerInfo = providerDef(provider);
+  const activeModel = modelFor(provider, state.settings.aiModels);
+
+  const setModel = (value: string) => {
+    const next = { ...state.settings.aiModels };
+    // Storing the built-in default as an override would freeze it; keep "default" as absent.
+    if (!value.trim() || value.trim() === providerInfo.model) delete next[provider];
+    else next[provider] = value.trim();
+    dispatch({ type: 'updateSettings', patch: { aiModels: next } });
+  };
 
   const refreshApiKey = () => {
     if (window.ledgerApi) window.ledgerApi.secretsGetApiKeyMasked(provider).then(setApiKeyMasked);
@@ -114,9 +123,9 @@ export default function Settings() {
         .map(t => t.merchantNormalized),
     )];
     if (uncategorized.length === 0) { setAiStatus('Nothing to categorize — all merchants matched.'); return; }
-    setAiStatus(`Asking ${providerInfo.label} about ${uncategorized.length} merchant${uncategorized.length > 1 ? 's' : ''}…`);
+    setAiStatus(`Asking ${activeModel} about ${uncategorized.length} merchant${uncategorized.length > 1 ? 's' : ''}…`);
     try {
-      const results = await categorizeMerchants(provider, apiKey, uncategorized, state.categories);
+      const results = await categorizeMerchants(provider, apiKey, uncategorized, state.categories, activeModel);
       dispatch({ type: 'applyApiResults', results });
       setAiStatus(`Categorized ${results.filter(r => r.categoryId).length} of ${uncategorized.length} merchants. Low-confidence ones stay in the review queue.`);
     } catch (e) {
@@ -206,7 +215,7 @@ export default function Settings() {
               <div>
                 <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink-3)' }}>Model provider</div>
                 <div style={{ fontSize: 11.5, color: 'var(--muted-2)', maxWidth: 440 }}>
-                  Uses {providerInfo.model}. Each provider keeps its own key, so switching back and forth doesn't lose either one.
+                  Each provider keeps its own key and model, so switching back and forth doesn't lose either one.
                 </div>
               </div>
               <div className="seg" style={{ flex: 'none' }}>
@@ -220,6 +229,26 @@ export default function Settings() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0', borderBottom: '1px solid #f2efe8', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink-3)' }}>Model</div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted-2)', maxWidth: 430 }}>
+                  Providers retire model ids over time. If a call fails with "model not available",
+                  set a current one here — no rebuild needed.
+                </div>
+              </div>
+              <input
+                className="input"
+                list={`models-${provider}`}
+                style={{ width: 230, flex: 'none' }}
+                value={activeModel}
+                onChange={e => setModel(e.target.value)}
+                placeholder={providerInfo.model}
+              />
+              <datalist id={`models-${provider}`}>
+                {[providerInfo.model, ...providerInfo.alternateModels].map(m => <option key={m} value={m} />)}
+              </datalist>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0', borderBottom: '1px solid #f2efe8' }}>
               <div>
