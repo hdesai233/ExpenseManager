@@ -51,13 +51,20 @@ export interface SuggestedPair {
  * Cross-account matching (§4.2a detection preference 1):
  * a debit on checking/savings + a credit on a credit card, near-equal absolute
  * amount, within ±3 days.
+ *
+ * Cash is excluded from the debit side. This runs over existing transactions on every import, and
+ * a hand-entered cash expense that happened to match a card credit in amount and date would
+ * otherwise be silently reclassified as a transfer and disappear from spend.
  */
 export function findTransferPairs(txns: Transaction[], accounts: Account[]): SuggestedPair[] {
   const acct = (id: string) => accounts.find(a => a.id === id);
   const pairs: SuggestedPair[] = [];
   const used = new Set<string>();
 
-  const debits = txns.filter(t => t.amount < 0 && acct(t.accountId)?.accountType !== 'credit_card');
+  const debits = txns.filter(t => {
+    const type = acct(t.accountId)?.accountType;
+    return t.amount < 0 && type !== 'credit_card' && type !== 'cash';
+  });
   const credits = txns.filter(t => t.amount > 0);
 
   for (const d of debits) {

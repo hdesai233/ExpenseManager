@@ -53,6 +53,26 @@ Click **Import** to open the wizard:
    - applies any matching categorization rules,
    - flags anything it isn't confident about for your review.
 
+## 3a. Adding a cash expense by hand
+
+Not everything reaches a statement. **Add expense** in the top bar records
+spending manually — cash, a split bill, an IOU — from any screen.
+
+Fill in what it was for, the amount (as a positive number), and
+optionally a category, date, tags, and notes. **Save & add another**
+keeps the form open and holds onto the date, category, and account, so a
+stack of receipts goes in quickly.
+
+- **Paid with** defaults to **Cash**. The Cash account is created for you
+  the first time you save one; after that it's a normal account you can
+  rename in Settings. You can also attribute a manual expense to any
+  other account.
+- Hand-typed names are tidied the same way imported ones are, so a cash
+  "starbucks" groups with your card's "SQ *STARBUCKS #4471" in merchant
+  totals and trends.
+- Manual expenses count toward spending exactly like imported charges,
+  and arrive already categorized, so they never land in the review queue.
+
 ## 4. Categorizing transactions
 
 Newly imported transactions that Ledger couldn't confidently categorize

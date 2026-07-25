@@ -378,6 +378,7 @@ function AccountModal({ account, onClose, onSave }: { account: Account; onClose:
             <option value="checking">Checking</option>
             <option value="credit_card">Credit card</option>
             <option value="savings">Savings</option>
+            <option value="cash">Cash</option>
           </select>
         </div>
         <div>

@@ -12,6 +12,7 @@ import Categories from './screens/Categories';
 import Reports from './screens/Reports';
 import Settings from './screens/Settings';
 import ImportWizard from './screens/ImportWizard';
+import AddExpenseModal from './components/AddExpenseModal';
 
 interface NavItem { key: ViewKey; label: string; icon: React.ReactNode }
 
@@ -57,6 +58,7 @@ export default function App() {
   const [view, setView] = useState<ViewKey>('dashboard');
   const [search, setSearch] = useState('');
   const [importOpen, setImportOpen] = useState(false);
+  const [addExpenseOpen, setAddExpenseOpen] = useState(false);
   const [reportBannerDismissed, setReportBannerDismissed] = useState(false);
 
   const reviewCount = state.transactions.filter(needsReview).length;
@@ -91,6 +93,10 @@ export default function App() {
             {search && <button onClick={() => setSearch('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#97938a', fontSize: 13, padding: 0 }}>×</button>}
           </div>
         </div>
+        <button className="btn-ghost" style={{ marginRight: 8 }} onClick={() => setAddExpenseOpen(true)}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ marginRight: 5, verticalAlign: '-2px' }}><path d="M12 5v14M5 12h14" /></svg>
+          Add expense
+        </button>
         <button className="btn" onClick={() => setImportOpen(true)}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v11" /><path d="M8 10l4 4 4-4" /><path d="M4 19h16" /></svg>
           Import
@@ -162,6 +168,7 @@ export default function App() {
       </div>
 
       {importOpen && <ImportWizard onClose={() => setImportOpen(false)} />}
+      {addExpenseOpen && <AddExpenseModal onClose={() => setAddExpenseOpen(false)} />}
     </div>
   );
 }

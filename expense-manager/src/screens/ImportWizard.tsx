@@ -199,6 +199,7 @@ export default function ImportWizard({ onClose }: { onClose: () => void }) {
                   <option value="credit_card">Credit card</option>
                   <option value="checking">Checking</option>
                   <option value="savings">Savings</option>
+                  <option value="cash">Cash</option>
                 </select>
               </div>
               <div>

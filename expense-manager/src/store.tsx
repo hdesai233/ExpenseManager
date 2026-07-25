@@ -1,16 +1,32 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import type { Account, AppData, ImportBatch, ImportProfile, Rule, Settings, Transaction } from './types';
+import { MANUAL_BATCH_ID } from './types';
 import { learnRule } from './lib/categorize';
 import * as categoryOps from './lib/categoryOps';
+import { uid } from './lib/format';
+import { normalizeMerchant } from './lib/normalize';
 import { buildSampleData } from './lib/sample';
 import { loadData, saveData } from './lib/persist';
+
+/** A hand-entered expense (cash, or anything else that never lands on a statement). */
+export interface ManualExpenseInput {
+  date: string;              // ISO YYYY-MM-DD
+  description: string;
+  amount: number;            // positive; stored negated to match the expense sign convention
+  categoryId: string | null;
+  subcategoryId: string | null;
+  accountId: string | null;  // null = use (or create) the Cash account
+  tags: string[];
+  notes: string;
+}
 
 type Action =
   | { type: 'importCommit'; transactions: Transaction[]; batch: ImportBatch; account?: Account; profile?: ImportProfile }
   | { type: 'categorize'; txnIds: string[]; categoryId: string | null; subcategoryId: string | null; learn: boolean }
   | { type: 'confirmTxn'; txnId: string }
   | { type: 'updateTxn'; txnId: string; patch: Partial<Transaction> }
+  | { type: 'addManualExpense'; expense: ManualExpenseInput }
   | { type: 'deleteTxns'; txnIds: string[] }
   | { type: 'bulkAddTag'; txnIds: string[]; tag: string }
   | { type: 'applyApiResults'; results: Array<{ merchant: string; categoryId: string | null; subcategoryId: string | null; confidence: number }> }
@@ -73,6 +89,50 @@ function reducer(state: AppData, action: Action): AppData {
     }
     case 'updateTxn':
       return { ...state, transactions: state.transactions.map(t => t.id === action.txnId ? { ...t, ...action.patch } : t) };
+    case 'addManualExpense': {
+      const e = action.expense;
+      const description = e.description.trim();
+      const amount = Math.abs(e.amount);
+      if (!description || !(amount > 0)) return state;
+
+      // Resolve the account, creating a Cash one the first time it's needed. issuingBank is left
+      // blank deliberately: it feeds credit-card-payment detection, and a bank named "Cash" would
+      // make descriptions like "CASH APP PAYMENT" look like card payments.
+      let accounts = state.accounts;
+      let accountId = e.accountId;
+      if (!accountId) {
+        const existing = accounts.find(a => a.accountType === 'cash');
+        if (existing) {
+          accountId = existing.id;
+        } else {
+          const cash: Account = { id: uid(), name: 'Cash', issuingBank: '', accountType: 'cash', color: '#9aa06b' };
+          accounts = [...accounts, cash];
+          accountId = cash.id;
+        }
+      }
+
+      const txn: Transaction = {
+        id: uid(),
+        date: e.date,
+        merchantRaw: description,
+        // Normalize so a hand-typed "starbucks" groups with the imported "SQ *STARBUCKS #123"
+        // in merchant totals and trends.
+        merchantNormalized: normalizeMerchant(description),
+        amount: -amount,
+        currency: 'USD',
+        accountId,
+        categoryId: e.categoryId,
+        subcategoryId: e.subcategoryId,
+        confidence: 1,
+        categorizationSource: 'manual',
+        flowType: 'expense',
+        tags: e.tags,
+        notes: e.notes,
+        importBatchId: MANUAL_BATCH_ID,
+        reviewed: true,
+      };
+      return { ...state, accounts, transactions: [...state.transactions, txn] };
+    }
     case 'deleteTxns': {
       const ids = new Set(action.txnIds);
       return { ...state, transactions: state.transactions.filter(t => !ids.has(t.id)) };

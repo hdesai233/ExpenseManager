@@ -1,6 +1,12 @@
 // ---- Core data model (mirrors requirements §6) ----
 
-export type AccountType = 'checking' | 'credit_card' | 'savings';
+export type AccountType = 'checking' | 'credit_card' | 'savings' | 'cash';
+
+/**
+ * Sentinel `importBatchId` for hand-entered transactions, which belong to no import.
+ * Nothing dereferences importBatchId, so this never needs a matching ImportBatch row.
+ */
+export const MANUAL_BATCH_ID = 'manual';
 
 export interface Account {
   id: string;

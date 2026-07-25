@@ -241,6 +241,28 @@ UI copy should keep saying so rather than overclaiming.
    has no category or confidence below `REVIEW_THRESHOLD` (0.7). The count
    surfaces as a badge on the Transactions nav item.
 
+### 6a. Manual entry
+
+Cash and other off-statement spending bypasses the pipeline above: the
+`addManualExpense` reducer case builds the `Transaction` directly, with
+`categorizationSource: 'manual'`, `confidence: 1`, and `reviewed: true`,
+so it never enters the review queue. Two details are load-bearing:
+
+- **Cash accounts are excluded from `findTransferPairs`.** That function
+  runs over *existing* transactions on every import, so a hand-entered
+  cash expense that happened to match a card credit in amount and date
+  would otherwise be silently reclassified as a transfer and vanish from
+  spend.
+- **The Cash account is created with a blank `issuingBank`.** That field
+  feeds `looksLikeCardPayment`, which matches a bank name near "PAY"/
+  "PMT" — an account literally named "Cash" would make a description like
+  "CASH APP PAYMENT" look like a card payment.
+
+Descriptions still go through `normalizeMerchant`, so a typed "starbucks"
+aggregates with the imported "SQ *STARBUCKS #4471". `importBatchId` is the
+`MANUAL_BATCH_ID` sentinel; nothing dereferences that field, so no
+`ImportBatch` row is fabricated to match it.
+
 ## 7. Categories, splits, and referential integrity
 
 Category CRUD (`lib/categoryOps.ts`) is written as pure functions so
