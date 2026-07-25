@@ -344,6 +344,19 @@ subcategory id (vs. `undefined`) specifically means the "no subcategory"
 bucket. The modal has its own CSV export scoped to whatever's currently
 filtered.
 
+The same affordance exists on Analytics' "Daily spend by account" chart,
+via an `onBarClick?: (labelIndex, seriesIndex) => void` prop added to
+`StackedBarChart` itself (`components/ui.tsx`) — optional, so the chart's
+other two call sites (Reports' category-trend chart, Trends' category-mix
+chart) are unaffected. Each day column gets a transparent full-height hit
+rect *behind* its colored segments; clicking a colored segment reports
+its `seriesIndex`, clicking the transparent background around it reports
+`-1` (sentinel for "this day, no specific series"). `DayDrilldownModal`
+in `Analytics.tsx` reads that as "one account" vs. "every account that
+day" and filters `state.transactions` directly by exact date — no
+Report-style pre-aggregated data to reuse here, since this chart isn't
+built from a `ReportData`.
+
 ## 9. Build & packaging
 
 - `npm run dev` — Vite only, browser-fallback mode, hot reload, fastest

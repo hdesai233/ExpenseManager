@@ -222,10 +222,13 @@ export function BarChartH({ width, items, labelWidth = 116 }: {
  * Monthly stacked bars by category — shows both total spend per month and its category mix.
  * `series[].values` are index-aligned with `labels`.
  */
-export function StackedBarChart({ width, height, labels, series }: {
+export function StackedBarChart({ width, height, labels, series, onBarClick }: {
   width: number; height: number;
   labels: string[];
   series: Array<{ label: string; color: string; values: number[] }>;
+  /** Optional drill-down hook. `seriesIndex` is -1 when the click landed on the day's empty
+   * background rather than a specific segment (i.e. "this whole day", not "this one account"). */
+  onBarClick?: (labelIndex: number, seriesIndex: number) => void;
 }) {
   const padT = 12, padB = 24, padL = 38, padR = 8;
   const plotW = width - padL - padR, plotH = height - padT - padB;
@@ -253,13 +256,26 @@ export function StackedBarChart({ width, height, labels, series }: {
         let cursor = 0;
         return (
           <g key={label + i}>
-            {series.map(s => {
+            {onBarClick && (
+              <rect
+                x={cx - slot / 2} y={padT} width={slot} height={plotH}
+                fill="transparent" style={{ cursor: 'pointer' }}
+                onClick={() => onBarClick(i, -1)}
+              />
+            )}
+            {series.map((s, si) => {
               const v = s.values[i] ?? 0;
               if (v <= 0) return null;
               const h = (v / max) * plotH;
               const y = yAt(cursor + v);
               cursor += v;
-              return <rect key={s.label} x={cx - barW / 2} y={y} width={barW} height={Math.max(h, 0.5)} fill={s.color} />;
+              return (
+                <rect
+                  key={s.label} x={cx - barW / 2} y={y} width={barW} height={Math.max(h, 0.5)} fill={s.color}
+                  style={onBarClick ? { cursor: 'pointer' } : undefined}
+                  onClick={onBarClick ? () => onBarClick(i, si) : undefined}
+                />
+              );
             })}
             <text x={cx} y={height - 8} fill="#a09c92" fontSize="10.5" textAnchor="middle">{label}</text>
           </g>

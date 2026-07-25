@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { addMonths, currentYM, monthShort, monthYearFull, usd } from '../lib/format';
+import { addMonths, currentYM, monthShort, monthYearFull, shortDate, usd, usd2 } from '../lib/format';
 import {
-  categorySpend, dailySpendByAccount, forecastMonthSpend, merchantTrends, monthlySeries,
+  categorySpend, dailySpendByAccount, forecastMonthSpend, isSpend, merchantTrends, monthlySeries,
   monthlySpend, spendPace, topMerchants,
 } from '../lib/analytics';
-import { categoryName, useStore } from '../store';
-import { StackedBarChart, TrendChart } from '../components/ui';
+import { accountName, categoryName, useStore } from '../store';
+import { Modal, StackedBarChart, TrendChart } from '../components/ui';
+import type { AppData } from '../types';
 
 export default function Analytics() {
   const { state } = useStore();
@@ -59,6 +60,7 @@ export default function Analytics() {
   const { days, series: accountSeries } = useMemo(() => dailySpendByAccount(txns, state.accounts, dailyYm), [txns, state.accounts, dailyYm]);
   const dailyTotal = accountSeries.reduce((a, s) => a + s.values.reduce((x, y) => x + y, 0), 0);
   const dailyLabels = days.map(String);
+  const [dayDrilldown, setDayDrilldown] = useState<{ day: number; accountId: string | null } | null>(null);
 
   // ---- spend pace: this month's cumulative spend vs. the average of the prior 3 months ----
   const pace = useMemo(() => spendPace(txns, dailyYm, 3), [txns, dailyYm]);
@@ -120,12 +122,18 @@ export default function Analytics() {
           <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '20px 0', textAlign: 'center' }}>No spending in {monthYearFull(dailyYm)}.</div>
         ) : (
           <>
-            <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 14 }}>{usd(dailyTotal)} total across {days.length} days</div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 14 }}>
+              {usd(dailyTotal)} total across {days.length} days · click a bar to see that day's transactions
+            </div>
             <StackedBarChart
               width={900}
               height={220}
               labels={dailyLabels}
               series={accountSeries.map(s => ({ label: s.accountName, color: s.color, values: s.values }))}
+              onBarClick={(dayIdx, seriesIdx) => setDayDrilldown({
+                day: days[dayIdx],
+                accountId: seriesIdx >= 0 ? accountSeries[seriesIdx].accountId : null,
+              })}
             />
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 10 }}>
               {accountSeries.map(s => (
@@ -271,6 +279,112 @@ export default function Analytics() {
           </div>
         </div>
       </div>
+
+      {dayDrilldown && (
+        <DayDrilldownModal
+          state={state}
+          ym={dailyYm}
+          day={dayDrilldown.day}
+          accountId={dayDrilldown.accountId}
+          onClose={() => setDayDrilldown(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/** Drill-down from a "Daily spend by account" bar: every transaction for that day, optionally
+ * narrowed to the one account whose segment was clicked. */
+function DayDrilldownModal({ state, ym, day, accountId, onClose }: {
+  state: AppData; ym: string; day: number; accountId: string | null; onClose: () => void;
+}) {
+  const [filterAccountId, setFilterAccountId] = useState(accountId);
+  const dateISO = `${ym}-${String(day).padStart(2, '0')}`;
+
+  const dayTxns = state.transactions.filter(t => t.date === dateISO && isSpend(t));
+  const accountsToday = [...new Map(dayTxns.map(t => [t.accountId, accountName(state, t.accountId)])).entries()];
+  const shown = (filterAccountId ? dayTxns.filter(t => t.accountId === filterAccountId) : dayTxns)
+    .sort((a, b) => a.amount - b.amount);
+  const shownTotal = shown.reduce((a, t) => a + -t.amount, 0);
+
+  const exportCSV = () => {
+    const header = 'date,merchant,raw_description,amount,account,category,tags,notes';
+    const esc = (s: string) => '"' + s.replace(/"/g, '""') + '"';
+    const rows = shown.map(t => [
+      t.date, esc(t.merchantNormalized), esc(t.merchantRaw), t.amount.toFixed(2),
+      esc(accountName(state, t.accountId)), esc(categoryName(state, t.subcategoryId ?? t.categoryId)),
+      esc(t.tags.join(';')), esc(t.notes),
+    ].join(','));
+    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `ledger-${dateISO}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <Modal
+      title={shortDate(dateISO)}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>{usd(shownTotal)} · {shown.length} transaction{shown.length === 1 ? '' : 's'}</span>
+          <button className="btn-ghost" onClick={exportCSV} disabled={shown.length === 0}>Export CSV</button>
+        </>
+      }
+    >
+      {accountsToday.length > 1 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+          <button
+            className={'chip clickable' + (filterAccountId === null ? ' active' : '')}
+            style={{ border: filterAccountId === null ? '1px solid var(--green-2)' : undefined }}
+            onClick={() => setFilterAccountId(null)}
+          >
+            All accounts
+          </button>
+          {accountsToday.map(([id, name]) => (
+            <button
+              key={id}
+              className={'chip clickable' + (filterAccountId === id ? ' active' : '')}
+              style={{ border: filterAccountId === id ? '1px solid var(--green-2)' : undefined }}
+              onClick={() => setFilterAccountId(id)}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--soft-border)' }}>
+              <th style={{ textAlign: 'left', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Merchant</th>
+              <th style={{ textAlign: 'left', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Category</th>
+              <th style={{ textAlign: 'left', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Account</th>
+              <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length === 0 && (
+              <tr><td colSpan={4} style={{ padding: '20px 0', textAlign: 'center', color: 'var(--muted-2)' }}>No transactions.</td></tr>
+            )}
+            {shown.map(t => (
+              <tr key={t.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                <td style={{ padding: '6px 8px 6px 0', color: 'var(--ink-3)' }}>
+                  {t.merchantNormalized}
+                  {t.splits && t.splits.length > 1 && <span style={{ marginLeft: 6, fontSize: 10.5, color: 'var(--muted-3)' }}>split</span>}
+                </td>
+                <td style={{ padding: '6px 8px', color: 'var(--muted-2)' }}>{categoryName(state, t.subcategoryId ?? t.categoryId)}</td>
+                <td style={{ padding: '6px 8px', color: 'var(--muted-2)' }}>{accountName(state, t.accountId)}</td>
+                <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, color: 'var(--ink)' }}>{usd2(t.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
   );
 }

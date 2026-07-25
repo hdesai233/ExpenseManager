@@ -161,7 +161,10 @@ across how many charges, how that compares with your recent average, the
 category that moved most, a projection for the month, your category
 breakdown, and what changed versus last month. **Analytics** goes deeper
 — spend by month, a day-by-day breakdown of one month split by account
-(navigate with the arrows next to the month label), a **spend pace**
+(navigate with the arrows next to the month label; click any bar to see
+that day's transactions — click a specific account's colored segment to
+filter to just that account, or the empty space around it for the whole
+day), a **spend pace**
 chart comparing that month's running total against the average of the
 prior three months at the same point ("through day 18 you're $140 above
 your typical pace" — an early warning, not just a month-end summary),
