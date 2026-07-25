@@ -1,7 +1,8 @@
-import type { Budget, Category, Goal, Transaction } from '../types';
+import type { Category, Transaction } from '../types';
 import { addMonths, currentYM, daysInMonth, todayISO, toYM } from './format';
 
 // ---- Aggregations, forecasting, recurring detection (§4.5, §4.8) ----
+// Ledger tracks spending only: there is no income, savings, or budget math here.
 
 /** True spending amount for analytics: expenses net of merchant credits; transfers excluded. */
 export function isSpend(t: Transaction): boolean {
@@ -13,20 +14,12 @@ export function spendOf(t: Transaction): number {
   return isSpend(t) ? -t.amount : 0;
 }
 
-export function incomeOf(t: Transaction): number {
-  return t.flowType === 'income' ? t.amount : 0;
-}
-
 export function txnsInMonth(txns: Transaction[], ym: string): Transaction[] {
   return txns.filter(t => toYM(t.date) === ym);
 }
 
 export function monthlySpend(txns: Transaction[], ym: string): number {
   return txnsInMonth(txns, ym).reduce((a, t) => a + spendOf(t), 0);
-}
-
-export function monthlyIncome(txns: Transaction[], ym: string): number {
-  return txnsInMonth(txns, ym).reduce((a, t) => a + incomeOf(t), 0);
 }
 
 export interface CatSpend { category: Category; amount: number; pct: number }
@@ -100,14 +93,14 @@ export function forecastMonthSpend(txns: Transaction[], ym: string, categoryId?:
   return { projected: Math.max(projected, sofar), confident: hist.length >= 3 };
 }
 
-export interface MonthPoint { ym: string; spend: number; income: number }
+export interface MonthPoint { ym: string; spend: number }
 
 export function monthlySeries(txns: Transaction[], months: number, anchorYm?: string): MonthPoint[] {
   const anchor = anchorYm ?? currentYM();
   const out: MonthPoint[] = [];
   for (let i = months - 1; i >= 0; i--) {
     const ym = addMonths(anchor, -i);
-    out.push({ ym, spend: monthlySpend(txns, ym), income: monthlyIncome(txns, ym) });
+    out.push({ ym, spend: monthlySpend(txns, ym) });
   }
   return out;
 }
@@ -218,48 +211,98 @@ function median(arr: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-// ---- Budget pacing ----
+// ---- Expense trends (what replaced budget pacing and savings goals) ----
 
-export interface BudgetPace {
-  budget: Budget;
+export interface CategoryMove {
   category: Category;
-  spent: number;
-  projected: number;
-  overPace: boolean;
+  current: number;
+  previous: number;
+  delta: number;      // positive = spending went up
+  pctChange: number;  // 0 when there's no prior spend to compare against
+  isNew: boolean;     // spent this month, nothing the month before
 }
 
-export function budgetPacing(budgets: Budget[], txns: Transaction[], categories: Category[], ym: string): BudgetPace[] {
-  return budgets
-    .map(b => {
-      const category = categories.find(c => c.id === b.categoryId);
-      if (!category) return null;
-      const spent = categorySpend(txns, b.categoryId, ym);
-      const { projected } = forecastMonthSpend(txns, ym, b.categoryId);
-      return { budget: b, category, spent, projected, overPace: projected > b.monthlyLimit * 1.02 };
+/**
+ * Month-over-month movement per top-level category, biggest absolute change first.
+ * Answers "what changed?" rather than "did I stay under a limit?".
+ */
+export function categoryMovers(txns: Transaction[], categories: Category[], ym: string): CategoryMove[] {
+  const prevYm = addMonths(ym, -1);
+
+  return categories
+    .filter(c => !c.parentId)
+    .map(category => {
+      const current = categorySpend(txns, category.id, ym);
+      const previous = categorySpend(txns, category.id, prevYm);
+      const delta = current - previous;
+      return {
+        category,
+        current,
+        previous,
+        delta,
+        pctChange: previous > 0.005 ? delta / previous : 0,
+        isNew: previous <= 0.005 && current > 0.005,
+      };
     })
-    .filter((x): x is BudgetPace => x !== null)
-    .sort((a, b) => (b.spent / b.budget.monthlyLimit) - (a.spent / a.budget.monthlyLimit));
+    .filter(m => Math.abs(m.delta) > 0.005)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 }
 
-// ---- Goal feasibility (§4.8) ----
-
-export interface GoalProjection {
-  goal: Goal;
-  monthsToTarget: number;      // months until target date
-  monthsNeeded: number;        // months at current contribution
-  feasible: boolean;
-  extraMonthlyNeeded: number;  // to hit the date
+export interface SpendStats {
+  average: number;   // mean monthly spend across active months
+  median: number;
+  highest: MonthPoint | null;
+  lowest: MonthPoint | null;
 }
 
-export function projectGoal(goal: Goal): GoalProjection {
-  const now = new Date(todayISO());
-  const tgt = new Date(goal.targetDate);
-  const monthsToTarget = Math.max(0, (tgt.getFullYear() - now.getFullYear()) * 12 + tgt.getMonth() - now.getMonth());
-  const remaining = Math.max(0, goal.targetAmount - goal.currentAmount);
-  const monthsNeeded = goal.monthlyContribution > 0 ? Math.ceil(remaining / goal.monthlyContribution) : Infinity;
-  const feasible = monthsNeeded <= monthsToTarget;
-  const extraMonthlyNeeded = feasible || monthsToTarget === 0
-    ? 0
-    : Math.ceil(remaining / monthsToTarget - goal.monthlyContribution);
-  return { goal, monthsToTarget, monthsNeeded, feasible, extraMonthlyNeeded };
+/** Descriptive stats over a monthly series, ignoring months with no activity at all. */
+export function spendStats(series: MonthPoint[]): SpendStats {
+  const active = series.filter(m => m.spend > 0.005);
+  if (active.length === 0) return { average: 0, median: 0, highest: null, lowest: null };
+  const values = active.map(m => m.spend);
+  return {
+    average: values.reduce((a, b) => a + b, 0) / values.length,
+    median: median(values),
+    highest: active.reduce((a, m) => (m.spend > a.spend ? m : a), active[0]),
+    lowest: active.reduce((a, m) => (m.spend < a.spend ? m : a), active[0]),
+  };
+}
+
+/** Trailing average over `window` months, index-aligned with `series`; null until enough history. */
+export function rollingAverage(series: MonthPoint[], window: number): Array<number | null> {
+  return series.map((_, i) => {
+    if (i + 1 < window) return null;
+    return series.slice(i + 1 - window, i + 1).reduce((a, m) => a + m.spend, 0) / window;
+  });
+}
+
+export interface Outlier { txn: Transaction; merchantMedian: number; ratio: number }
+
+/**
+ * Charges well above what that merchant normally costs. Requires a few prior charges before it
+ * will call anything unusual, so a first-time merchant is never flagged just for being new.
+ */
+export function unusualCharges(txns: Transaction[], ym: string, minRatio = 2): Outlier[] {
+  const history = new Map<string, number[]>();
+  for (const t of txns) {
+    if (!isSpend(t) || toYM(t.date) >= ym) continue;
+    const amt = spendOf(t);
+    if (amt <= 0) continue;
+    const arr = history.get(t.merchantNormalized) ?? [];
+    arr.push(amt);
+    history.set(t.merchantNormalized, arr);
+  }
+
+  const out: Outlier[] = [];
+  for (const t of txnsInMonth(txns, ym)) {
+    if (!isSpend(t)) continue;
+    const amt = spendOf(t);
+    const prior = history.get(t.merchantNormalized);
+    if (amt <= 0 || !prior || prior.length < 3) continue;
+    const merchantMedian = median(prior);
+    if (merchantMedian <= 0.005) continue;
+    const ratio = amt / merchantMedian;
+    if (ratio >= minRatio) out.push({ txn: t, merchantMedian, ratio });
+  }
+  return out.sort((a, b) => b.ratio - a.ratio);
 }

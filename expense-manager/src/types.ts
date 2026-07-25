@@ -11,7 +11,12 @@ export interface Account {
   color: string;
 }
 
-export type FlowType = 'expense' | 'merchant_credit' | 'income' | 'transfer';
+/**
+ * Ledger tracks spending only — there is no income, savings, or budget concept.
+ * `merchant_credit` (a refund/return) nets against spend; `transfer` (card payments and
+ * account-to-account movement) is excluded from spend entirely rather than counted as income.
+ */
+export type FlowType = 'expense' | 'merchant_credit' | 'transfer';
 export type TransferSubtype = 'credit_card_payment' | 'internal_transfer';
 export type CategorizationSource = 'rule' | 'api' | 'manual' | 'none';
 
@@ -92,21 +97,6 @@ export interface ColumnMapping {
   credit?: string;
 }
 
-export interface Budget {
-  id: string;
-  categoryId: string;
-  monthlyLimit: number;
-}
-
-export interface Goal {
-  id: string;
-  name: string;
-  targetAmount: number;
-  targetDate: string;         // ISO
-  currentAmount: number;
-  monthlyContribution: number;
-}
-
 /** LLM backend used for the categorization fallback (§4.4 step 3). Keys live in the OS keychain. */
 export type AiProvider = 'anthropic' | 'gemini';
 
@@ -133,11 +123,9 @@ export interface AppData {
   rules: Rule[];
   batches: ImportBatch[];
   profiles: ImportProfile[];
-  budgets: Budget[];
-  goals: Goal[];
   settings: Settings;
 }
 
 export type ViewKey =
   | 'dashboard' | 'transactions' | 'analytics'
-  | 'budgets' | 'subscriptions' | 'categories' | 'reports' | 'settings';
+  | 'trends' | 'subscriptions' | 'categories' | 'reports' | 'settings';

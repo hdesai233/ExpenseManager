@@ -5,7 +5,7 @@ import { accountName, categoryColor, txnCategoryLabel, useStore } from '../store
 import type { AppData, Transaction, TransactionSplit } from '../types';
 import { ConfidenceBadge, CreditIcon, Modal, TransferIcon } from '../components/ui';
 
-type Tab = 'all' | 'spending' | 'income' | 'transfers' | 'review';
+type Tab = 'all' | 'spending' | 'transfers' | 'review';
 
 function resolveCategorySelection(state: AppData, value: string): { categoryId: string; subcategoryId: string | null } | null {
   const cat = state.categories.find(c => c.id === value);
@@ -25,7 +25,6 @@ export default function Transactions({ search }: { search: string }) {
     let list = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
     switch (tab) {
       case 'spending': list = list.filter(t => t.flowType === 'expense' || t.flowType === 'merchant_credit'); break;
-      case 'income': list = list.filter(t => t.flowType === 'income'); break;
       case 'transfers': list = list.filter(t => t.flowType === 'transfer'); break;
       case 'review': list = list.filter(needsReview); break;
     }
@@ -104,7 +103,7 @@ export default function Transactions({ search }: { search: string }) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         <div className="seg">
-          {([['all', 'All'], ['spending', 'Spending'], ['income', 'Income'], ['transfers', 'Transfers']] as Array<[Tab, string]>).map(([k, label]) => (
+          {([['all', 'All'], ['spending', 'Spending'], ['transfers', 'Transfers']] as Array<[Tab, string]>).map(([k, label]) => (
             <button key={k} className={'seg-item' + (tab === k ? ' active' : '')} onClick={() => setTab(k)}>{label}</button>
           ))}
           <button className={'seg-item' + (tab === 'review' ? ' active' : '')} style={{ color: tab === 'review' ? 'var(--red)' : 'var(--red)' }} onClick={() => setTab('review')}>
@@ -335,7 +334,7 @@ function TransactionModal({ txn, onClose }: { txn: Transaction; onClose: () => v
     >
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 18 }}>
         <span style={{ fontSize: 24, fontWeight: 300, color: txn.amount > 0 ? 'var(--green-ok)' : 'var(--ink)' }}>{signedUsd2(txn.amount)}</span>
-        {isTransfer && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Transfers can't be categorized or split — they're excluded from spend and income.</span>}
+        {isTransfer && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Card payments and transfers can't be categorized or split — they're excluded from spend.</span>}
       </div>
 
       {!isTransfer && (

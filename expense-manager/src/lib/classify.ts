@@ -1,6 +1,6 @@
 import type { Account, Transaction } from '../types';
 
-// ---- Transaction type classification: payments vs. returns vs. income vs. transfers (§4.2a) ----
+// ---- Transaction type classification: purchases vs. returns vs. card payments/transfers (§4.2a) ----
 
 const PAYMENT_PATTERNS = [
   /PAYMENT\s*THANK\s*YOU/i,
@@ -101,7 +101,8 @@ export function classifyFlow(
 
   if (t.amount <= 0) return { flowType: 'expense' };
 
-  // Positive amount on a credit card that isn't a payment → merchant credit
+  // Positive amount on a credit card that isn't a payment → merchant credit (refund/return),
+  // which nets against spend in that category.
   const hist = merchantHistory.get(t.merchantNormalized.toUpperCase());
   if (hist || looksLikeRefund(t.merchantRaw)) {
     return { flowType: 'merchant_credit', creditCategory: hist ?? { categoryId: null, subcategoryId: null } };
@@ -110,5 +111,8 @@ export function classifyFlow(
     // Unrecognized credit on a card — treat as merchant credit, leave for categorization pipeline
     return { flowType: 'merchant_credit', creditCategory: { categoryId: null, subcategoryId: null } };
   }
-  return { flowType: 'income' };
+  // A positive amount on a non-card account (this app imports card statements, so this is rare):
+  // there's no income concept to file it under, and guessing "refund" would wrongly reduce spend.
+  // Park it as a transfer, which is excluded from spend entirely.
+  return { flowType: 'transfer', transferSubtype: 'internal_transfer' };
 }

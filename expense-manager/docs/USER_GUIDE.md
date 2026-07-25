@@ -28,7 +28,7 @@ importing your own data.
 - **Sidebar**: three sections —
   - *Overview*: Dashboard, Transactions (badge = items awaiting review),
     Analytics
-  - *Planning*: Budgets & Goals, Subscriptions
+  - *Insights*: Trends, Subscriptions
   - *Manage*: Categories & Rules, Reports & Export, Settings
   - Below that, your linked accounts and household name.
 
@@ -46,9 +46,10 @@ Click **Import** to open the wizard:
    **import profile** so future statements from the same account/bank
    import with one click.
 4. **Review & confirm** — Ledger imports the rows, automatically:
-   - classifies each row as an expense, income, merchant credit, or
-     transfer (credit-card payments and account-to-account transfers are
-     detected automatically and excluded from your spending totals),
+   - classifies each row as an expense, a merchant credit (refund), or a
+     transfer — credit-card payments and account-to-account transfers are
+     detected automatically and excluded from your spending totals, while
+     refunds net against what you spent in that category,
    - applies any matching categorization rules,
    - flags anything it isn't confident about for your review.
 
@@ -90,20 +91,32 @@ subcategories nested underneath).
   the tax-summary export.
 - **Edit**: rename or recolor a category, or toggle tax-deductible.
 - **Merge**: fold one category into another — every transaction, split,
-  rule, and budget that referenced the old category is repointed to the
-  target, and any of its subcategories move under the target too.
+  and rule that referenced the old category is repointed to the target,
+  and any of its subcategories move under the target too.
 - **Delete**: shows an impact preview first (how many transactions,
-  splits, rules, and budgets reference it) and lets you pick a
-  replacement category for anything currently using it. Anything left
-  unassigned falls back to **Other**, which is why "Other" itself can't
-  be deleted or merged away.
+  splits, and rules reference it) and lets you pick a replacement
+  category for anything currently using it. Anything left unassigned
+  falls back to **Other**, which is why "Other" itself can't be deleted
+  or merged away.
 
-## 6. Budgets & Goals
+## 6. Trends
 
-Set a **monthly limit** per category and track spend-to-date against it
-through the month. Savings **goals** track a target amount, target date,
-and a suggested monthly contribution — use this for things like an
-emergency fund or a vacation.
+Ledger has no budgets or savings targets — it compares your spending
+against **its own history** instead. Pick a 6, 12, or 24-month window and
+you get:
+
+- **Average / median / highest / lowest month**, so you know what
+  "normal" actually looks like for you. The average only counts months
+  that had spending, so an empty stretch doesn't drag it down.
+- **Monthly spend** as a line, with a 3-month rolling average over it to
+  separate a real drift from one noisy month.
+- **Spending more / Spending less** — the categories that moved most
+  versus last month, with the before and after figures.
+- **Category mix by month** and **total by category** for the window.
+- **Unusual charges** — individual charges well above what that merchant
+  normally costs you. A merchant needs at least three previous charges
+  before it can be flagged, so a first-time merchant is never called
+  unusual just for being new.
 
 ## 7. Subscriptions
 
@@ -113,21 +126,24 @@ can spot ones you forgot about.
 
 ## 8. Analytics & Dashboard
 
-**Dashboard** gives you an at-a-glance monthly view: income vs. spend,
-top categories, recent activity. **Analytics** goes deeper — spend by
-category over time, merchant breakdowns, and trend charts you can filter
-by date range and account.
+**Dashboard** gives you an at-a-glance monthly view: what you spent and
+across how many charges, how that compares with your recent average, the
+category that moved most, a projection for the month, your category
+breakdown, and what changed versus last month. **Analytics** goes deeper
+— spend by month, merchant breakdowns, and a what-if simulator for
+modelling a spending cut.
 
 ## 9. Reports & Export
 
 Four report templates, all built from the same underlying data so numbers
 always match what you see elsewhere in the app:
 
-- **Monthly Summary** — one month: totals, category breakdown, budget vs.
-  actual, top merchants, trend.
+- **Monthly Summary** — one month: totals, category breakdown, top
+  merchants, trend.
 - **Annual / Year-in-Review** — a full calendar year with the
   month-by-month trend front and center.
-- **Budget Performance** — one month, focused on budget vs. actual.
+- **Expense Breakdown** — a trailing window (1/3/6/12 months) with every
+  category and subcategory, charted.
 - **Custom Date Range** — pick any start/end date.
 
 For each report you can toggle which sections are included, then:

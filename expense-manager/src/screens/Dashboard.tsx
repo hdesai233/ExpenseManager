@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { budgetPacing, forecastMonthSpend, monthlyIncome, monthlySeries, monthlySpend, spendByCategory } from '../lib/analytics';
+import { categoryMovers, forecastMonthSpend, isSpend, monthlySeries, monthlySpend, spendByCategory, spendStats } from '../lib/analytics';
 import { needsReview } from '../lib/categorize';
-import { addMonths, currentYM, monthShort, monthYearFull, shortDate, signedUsd2, usd } from '../lib/format';
+import { addMonths, currentYM, daysInMonth, monthShort, monthYearFull, shortDate, signedUsd2, usd } from '../lib/format';
 import { accountName, categoryColor, txnCategoryLabel, useStore } from '../store';
 import type { ViewKey } from '../types';
 import { Donut, TrendChart } from '../components/ui';
@@ -28,18 +28,20 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
   };
 
   const spent = monthlySpend(txns, ym);
-  const income = monthlyIncome(txns, ym);
-  const saved = income - spent;
-  const totalBudget = state.budgets.reduce((a, b) => a + b.monthlyLimit, 0);
   const { projected, confident } = forecastMonthSpend(txns, ym);
-  const overBudget = projected - totalBudget;
+
+  const series = monthlySeries(txns, 6, ym);
+  const stats = spendStats(series.slice(0, -1)); // prior months only — the current one is partial
+  const vsAverage = stats.average > 0 ? (isCurrentMonth ? projected : spent) - stats.average : 0;
+
+  const txnCount = txns.filter(t => t.date.slice(0, 7) === ym && isSpend(t)).length;
+  const movers = categoryMovers(txns, state.categories, ym);
+  const topMover = movers[0] ?? null;
 
   const cats = spendByCategory(txns, state.categories, ym);
-  const pacing = budgetPacing(state.budgets, txns, state.categories, ym).slice(0, 5);
   const review = txns.filter(needsReview).sort((a, b) => b.date.localeCompare(a.date));
   const recent = [...txns].filter(t => t.date.slice(0, 7) === ym).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0, 6);
 
-  const series = monthlySeries(txns, 6, ym);
   const trendPoints = isCurrentMonth
     ? [...series.map(m => ({ label: monthShort(m.ym), value: m.spend })), { label: 'proj', value: projected }]
     : series.map(m => ({ label: monthShort(m.ym), value: m.spend }));
@@ -86,49 +88,58 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
         <div className="card" style={{ padding: '16px 17px' }}>
           <div className="kicker">{isCurrentMonth ? 'Spent this month' : 'Spent'}</div>
           <div className="big-num" style={{ margin: '9px 0 3px' }}>{usd(spent)}</div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 9 }}>
-            of {usd(totalBudget)} budget · {totalBudget ? Math.round(spent / totalBudget * 100) : 0}%
-          </div>
-          <div className="bar-track">
-            <div className="bar-fill" style={{ width: `${Math.min(totalBudget ? spent / totalBudget * 100 : 0, 100)}%` }} />
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            across {txnCount.toLocaleString()} charge{txnCount === 1 ? '' : 's'}
           </div>
         </div>
         <div className="card" style={{ padding: '16px 17px' }}>
-          <div className="kicker">Income</div>
-          <div className="big-num" style={{ margin: '9px 0 3px' }}>{usd(income)}</div>
-          <div style={{ fontSize: 12, color: 'var(--muted)' }}>Payroll + interest · net of transfers</div>
+          <div className="kicker">vs. 5-month average</div>
+          <div className="big-num" style={{ margin: '9px 0 3px', color: vsAverage > 0 ? 'var(--red)' : 'var(--green-ok)' }}>
+            {stats.average === 0 ? '—' : `${vsAverage > 0 ? '+' : ''}${usd(vsAverage)}`}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            {stats.average === 0 ? 'Not enough history yet' : `Typical month ${usd(stats.average)}`}
+          </div>
         </div>
         <div className="card" style={{ padding: '16px 17px' }}>
-          <div className="kicker">Net saved</div>
-          <div className="big-num" style={{ margin: '9px 0 3px', color: saved >= 0 ? 'var(--green-ok)' : 'var(--red)' }}>
-            {saved >= 0 ? '+' : ''}{usd(saved)}
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{income ? Math.round(saved / income * 100) : 0}% savings rate{isCurrentMonth ? ' this month' : ''}</div>
+          <div className="kicker">Biggest change</div>
+          {topMover ? (
+            <>
+              <div className="big-num" style={{ margin: '9px 0 3px', color: topMover.delta > 0 ? 'var(--red)' : 'var(--green-ok)' }}>
+                {topMover.delta > 0 ? '+' : ''}{usd(topMover.delta)}
+              </div>
+              <div className="ellip" style={{ fontSize: 12, color: 'var(--muted)' }}>
+                {topMover.category.name} · {topMover.isNew ? 'new this month' : 'vs. last month'}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="big-num" style={{ margin: '9px 0 3px' }}>—</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>No month-over-month change</div>
+            </>
+          )}
         </div>
         {isCurrentMonth ? (
           <div style={{ background: '#fdf7ee', border: '1px solid #ecdcbf', borderRadius: 14, padding: '16px 17px' }}>
             <div className="kicker" style={{ color: 'var(--amber-text)' }}>Projected month-end</div>
             <div className="big-num" style={{ margin: '9px 0 3px', color: 'var(--amber-deep)' }}>~{usd(projected)}</div>
-            <div style={{ fontSize: 12, color: 'var(--amber-text)', display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ fontSize: 12, color: 'var(--amber-text)' }}>
               {!confident ? 'Low confidence — under 3 months of history'
-                : overBudget > 0 ? <>⚠ On pace to exceed budget by {usd(overBudget)}</>
-                : 'On pace to stay within budget'}
+                : stats.average === 0 ? 'At the current pace'
+                : vsAverage > 0 ? `⚠ Tracking ${usd(vsAverage)} above typical`
+                : `Tracking ${usd(Math.abs(vsAverage))} below typical`}
             </div>
           </div>
         ) : (
           <div className="card" style={{ padding: '16px 17px' }}>
-            <div className="kicker">Budget result</div>
-            <div className="big-num" style={{ margin: '9px 0 3px', color: overBudget > 0 ? 'var(--red)' : 'var(--green-ok)' }}>
-              {overBudget > 0 ? `+${usd(overBudget)}` : usd(overBudget)}
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-              {totalBudget === 0 ? 'No budget set' : overBudget > 0 ? 'Over budget' : 'Within budget'}
-            </div>
+            <div className="kicker">Daily average</div>
+            <div className="big-num" style={{ margin: '9px 0 3px' }}>{usd(spent / daysInMonth(ym))}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>per day across {monthYearFull(ym)}</div>
           </div>
         )}
       </div>
 
-      {/* donut + budgets on pace */}
+      {/* donut + month-over-month movers */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 14, marginBottom: 14 }}>
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -156,36 +167,48 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
 
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <div className="card-title">Budgets on pace</div>
-            <button className="link-sm" onClick={() => go('budgets')}>View all</button>
+            <div className="card-title">What changed vs. last month</div>
+            <button className="link-sm" onClick={() => go('trends')}>View trends</button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-            {pacing.map(b => {
-              const barW = Math.min(b.spent / b.budget.monthlyLimit, 1) * 100;
-              const projLeft = Math.min(b.projected / b.budget.monthlyLimit, 1.35) * 100;
-              return (
-                <div key={b.budget.id}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span className="dot" style={{ width: 8, height: 8, background: b.category.color }} />
-                      <span style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500 }}>{b.category.name}</span>
+          {movers.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>
+              Nothing moved compared with last month.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              {movers.slice(0, 6).map(m => {
+                const scale = Math.max(...movers.slice(0, 6).map(x => Math.abs(x.delta)), 1);
+                const barW = Math.abs(m.delta) / scale * 100;
+                const up = m.delta > 0;
+                return (
+                  <div key={m.category.id}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <span className="dot" style={{ width: 8, height: 8, background: m.category.color, flex: 'none' }} />
+                        <span className="ellip" style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500 }}>{m.category.name}</span>
+                      </div>
+                      <span style={{ fontSize: 11.5, fontWeight: 600, flex: 'none', color: up ? 'var(--red)' : 'var(--green-ok)' }}>
+                        {up ? '+' : ''}{usd(m.delta)}
+                      </span>
                     </div>
-                    <span style={{ fontSize: 11.5, color: b.overPace ? 'var(--amber)' : 'var(--muted)', fontWeight: 500 }}>
-                      {b.overPace ? `Projected ${usd(b.projected)}` : 'On track'}
-                    </span>
+                    <div style={{ height: 5, background: 'var(--track)', borderRadius: 4 }}>
+                      <div style={{ height: '100%', width: `${barW}%`, background: up ? 'var(--red)' : 'var(--green-ok)', borderRadius: 4, opacity: .75 }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
+                      <span style={{ fontSize: 11, color: 'var(--muted-2)' }}>
+                        {m.isNew ? 'New this month' : `${usd(m.previous)} → ${usd(m.current)}`}
+                      </span>
+                      {!m.isNew && m.pctChange !== 0 && (
+                        <span style={{ fontSize: 11, color: 'var(--muted-2)' }}>
+                          {m.pctChange > 0 ? '+' : ''}{Math.round(m.pctChange * 100)}%
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ position: 'relative', height: 6, background: 'var(--track)', borderRadius: 4 }}>
-                    <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${barW}%`, background: b.spent > b.budget.monthlyLimit ? 'var(--red)' : b.category.color, borderRadius: 4 }} />
-                    <div style={{ position: 'absolute', top: -2, height: 10, width: 2, background: 'var(--muted)', left: `${projLeft}%` }} />
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                    <span style={{ fontSize: 11, color: 'var(--muted-2)' }}>{usd(b.spent)} spent</span>
-                    <span style={{ fontSize: 11, color: 'var(--muted-2)' }}>{usd(b.budget.monthlyLimit)}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 

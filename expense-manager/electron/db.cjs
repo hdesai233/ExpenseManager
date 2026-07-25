@@ -7,7 +7,7 @@ const path = require('node:path');
 // Internal SQLite table-structure version (tracked in schema_meta, drives future migrate() steps).
 // Distinct from AppData.schemaVersion (APP_DATA_VERSION below), which is the JSON-backup format
 // version — adding transaction_splits didn't change that shape, so it stays at 1.
-const SCHEMA_VERSION = 2; // v2: added transaction_splits
+const SCHEMA_VERSION = 3; // v2: added transaction_splits. v3: dropped budgets/goals (expenses-only)
 const APP_DATA_VERSION = 1;
 
 const SCHEMA_SQL = `
@@ -95,21 +95,6 @@ CREATE TABLE IF NOT EXISTS transaction_splits (
 );
 CREATE INDEX IF NOT EXISTS idx_splits_txn ON transaction_splits(transaction_id);
 
-CREATE TABLE IF NOT EXISTS budgets (
-  id TEXT PRIMARY KEY,
-  category_id TEXT NOT NULL,
-  monthly_limit REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS goals (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  target_amount REAL NOT NULL,
-  target_date TEXT NOT NULL,
-  current_amount REAL NOT NULL,
-  monthly_contribution REAL NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -133,9 +118,18 @@ function migrate() {
   // existing database is safe and additive (e.g. v1 -> v2 just adds transaction_splits).
   db.exec(SCHEMA_SQL);
   const row = db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('schema_version');
+  const current = row ? Number(row.value) : SCHEMA_VERSION;
+
+  // v3: Ledger tracks expenses only. Budgets and savings goals no longer exist in the data model,
+  // so drop their tables outright rather than leaving orphaned data behind. This is intentionally
+  // destructive and is not reversible from within the app.
+  if (current < 3) {
+    db.exec('DROP TABLE IF EXISTS budgets; DROP TABLE IF EXISTS goals;');
+  }
+
   if (!row) {
     db.prepare('INSERT INTO schema_meta (key, value) VALUES (?, ?)').run('schema_version', String(SCHEMA_VERSION));
-  } else if (Number(row.value) < SCHEMA_VERSION) {
+  } else if (current < SCHEMA_VERSION) {
     db.prepare('UPDATE schema_meta SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION), 'schema_version');
   }
   // Future migrations needing real column changes: read current version, apply ALTER TABLE steps in order, bump schema_meta.
@@ -198,13 +192,6 @@ function loadSnapshot() {
     importBatchId: r.import_batch_id, reviewed: !!r.reviewed,
     splits: splitsByTxn.get(r.id) ?? undefined,
   }));
-  const budgets = db.prepare('SELECT * FROM budgets').all().map(r => ({
-    id: r.id, categoryId: r.category_id, monthlyLimit: r.monthly_limit,
-  }));
-  const goals = db.prepare('SELECT * FROM goals').all().map(r => ({
-    id: r.id, name: r.name, targetAmount: r.target_amount, targetDate: r.target_date,
-    currentAmount: r.current_amount, monthlyContribution: r.monthly_contribution,
-  }));
   const settingsRows = db.prepare('SELECT * FROM settings').all();
   const settingsMap = Object.fromEntries(settingsRows.map(r => [r.key, r.value]));
   const settings = {
@@ -216,13 +203,13 @@ function loadSnapshot() {
     autoReportLastYM: settingsMap.autoReportLastYM ?? '',
   };
 
-  return { schemaVersion: APP_DATA_VERSION, accounts, transactions, categories, rules, batches, profiles, budgets, goals, settings };
+  return { schemaVersion: APP_DATA_VERSION, accounts, transactions, categories, rules, batches, profiles, settings };
 }
 
 function saveSnapshot(data) {
   db.exec('BEGIN IMMEDIATE');
   try {
-    const tables = ['transaction_splits', 'transactions', 'import_batches', 'import_profiles', 'rules', 'budgets', 'goals', 'categories', 'accounts', 'settings'];
+    const tables = ['transaction_splits', 'transactions', 'import_batches', 'import_profiles', 'rules', 'categories', 'accounts', 'settings'];
     for (const t of tables) db.exec(`DELETE FROM ${t}`);
 
     const insAccount = db.prepare('INSERT INTO accounts (id, name, issuing_bank, account_type, last_four, color) VALUES (?, ?, ?, ?, ?, ?)');
@@ -256,12 +243,6 @@ function saveSnapshot(data) {
         for (const s of t.splits) insSplit.run(s.id, t.id, s.categoryId, s.subcategoryId, s.amount, s.notes ?? '');
       }
     }
-
-    const insBudget = db.prepare('INSERT INTO budgets (id, category_id, monthly_limit) VALUES (?, ?, ?)');
-    for (const b of data.budgets) insBudget.run(b.id, b.categoryId, b.monthlyLimit);
-
-    const insGoal = db.prepare('INSERT INTO goals (id, name, target_amount, target_date, current_amount, monthly_contribution) VALUES (?, ?, ?, ?, ?, ?)');
-    for (const g of data.goals) insGoal.run(g.id, g.name, g.targetAmount, g.targetDate, g.currentAmount, g.monthlyContribution);
 
     const insSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
     insSetting.run('apiFallbackEnabled', data.settings.apiFallbackEnabled ? '1' : '0');

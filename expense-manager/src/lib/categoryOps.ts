@@ -1,10 +1,10 @@
-import type { AppData, Budget, Category, Rule, Transaction } from '../types';
+import type { AppData, Category, Rule, Transaction } from '../types';
 import { uid } from './format';
 
 // ---- Category taxonomy CRUD (§4.4: add/edit/delete/merge categories and subcategories) ----
 // Pure functions over AppData — the store reducer just calls these and returns the result.
 // The hard part isn't the category list itself; it's that categoryId/subcategoryId are
-// referenced from transactions (incl. splits), rules, and budgets, and none of those may be
+// referenced from transactions (incl. splits) and rules, and none of those may be
 // left pointing at a category that no longer exists.
 
 /** Seeded catch-all bucket — protected from deletion/merge-away; the fallback target when a
@@ -24,7 +24,6 @@ export interface CategoryUsage {
   transactions: number;   // transactions whose top-level or subcategory field references this category
   splits: number;         // transactions with a split referencing this category
   rules: number;
-  budgets: number;
 }
 
 /** How much data references this category (and, if it's top-level, its subcategories too). */
@@ -41,8 +40,7 @@ export function categoryUsage(data: AppData, id: string): CategoryUsage {
     if (splitHit) splits++;
   }
   const rules = data.rules.filter(r => ids.has(r.categoryId) || (r.subcategoryId && ids.has(r.subcategoryId))).length;
-  const budgets = data.budgets.filter(b => ids.has(b.categoryId)).length;
-  return { transactions, splits, rules, budgets };
+  return { transactions, splits, rules };
 }
 
 function descendantIds(categories: Category[], id: string): Set<string> {
@@ -82,9 +80,8 @@ export function deleteCategory(data: AppData, id: string, reassignTo: string | n
 
     const transactions = data.transactions.map(t => remapRemovedTop(t, removed, toTop, false));
     const rules = remapRulesRemovedTop(data.rules, removed, toTop, false);
-    const budgets = remapBudgets(data.budgets, removed, toTop);
     const categories = data.categories.filter(c => !removed.has(c.id));
-    return { ...data, transactions, rules, budgets, categories };
+    return { ...data, transactions, rules, categories };
   }
 
   // subcategory: default to "stay under the same parent, just clear the subcategory" when no target given
@@ -121,8 +118,7 @@ export function mergeCategory(data: AppData, fromId: string, intoId: string): Ap
       .map(c => c.parentId === fromId ? { ...c, parentId: intoId } : c);
     const transactions = data.transactions.map(t => remapRemovedTop(t, removed, intoId, true));
     const rules = remapRulesRemovedTop(data.rules, removed, intoId, true);
-    const budgets = remapBudgets(data.budgets, removed, intoId);
-    return { ...data, transactions, rules, budgets, categories };
+    return { ...data, transactions, rules, categories };
   }
 
   const toTop = into.parentId!;
@@ -181,16 +177,3 @@ function remapRulesRemovedSub(rules: Rule[], subId: string, toTop: string | null
   return rules.map(r => r.subcategoryId === subId ? { ...r, categoryId: toTop ?? UNCATEGORIZED_ID, subcategoryId: toSub } : r);
 }
 
-/** Reassign budgets onto the target category, dropping any that have no valid target and
- * de-duping so a category never ends up with two budgets after a merge. */
-function remapBudgets(budgets: Budget[], removedIds: Set<string>, toTop: string | null): Budget[] {
-  const seen = new Set<string>();
-  const out: Budget[] = [];
-  for (const b of budgets) {
-    const cid = removedIds.has(b.categoryId) ? toTop : b.categoryId;
-    if (!cid || seen.has(cid)) continue;
-    seen.add(cid);
-    out.push(cid === b.categoryId ? b : { ...b, categoryId: cid });
-  }
-  return out;
-}

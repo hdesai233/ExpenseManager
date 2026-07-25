@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
-import type { Account, AppData, Budget, Goal, ImportBatch, ImportProfile, Rule, Settings, Transaction } from './types';
+import type { Account, AppData, ImportBatch, ImportProfile, Rule, Settings, Transaction } from './types';
 import { learnRule } from './lib/categorize';
 import * as categoryOps from './lib/categoryOps';
 import { buildSampleData } from './lib/sample';
@@ -23,10 +23,6 @@ type Action =
   | { type: 'editCategory'; categoryId: string; patch: { name?: string; color?: string } }
   | { type: 'deleteCategory'; categoryId: string; reassignTo: string | null }
   | { type: 'mergeCategory'; fromId: string; intoId: string }
-  | { type: 'setBudget'; categoryId: string; monthlyLimit: number }
-  | { type: 'deleteBudget'; budgetId: string }
-  | { type: 'upsertGoal'; goal: Goal }
-  | { type: 'deleteGoal'; goalId: string }
   | { type: 'updateSettings'; patch: Partial<Settings> }
   | { type: 'restore'; data: AppData }
   | { type: 'resetAll' };
@@ -134,24 +130,6 @@ function reducer(state: AppData, action: Action): AppData {
       return categoryOps.deleteCategory(state, action.categoryId, action.reassignTo);
     case 'mergeCategory':
       return categoryOps.mergeCategory(state, action.fromId, action.intoId);
-    case 'setBudget': {
-      const existing = state.budgets.find(b => b.categoryId === action.categoryId);
-      if (action.monthlyLimit <= 0) {
-        return { ...state, budgets: state.budgets.filter(b => b.categoryId !== action.categoryId) };
-      }
-      const budget: Budget = existing
-        ? { ...existing, monthlyLimit: action.monthlyLimit }
-        : { id: Math.random().toString(36).slice(2), categoryId: action.categoryId, monthlyLimit: action.monthlyLimit };
-      return { ...state, budgets: existing ? state.budgets.map(b => b.id === budget.id ? budget : b) : [...state.budgets, budget] };
-    }
-    case 'deleteBudget':
-      return { ...state, budgets: state.budgets.filter(b => b.id !== action.budgetId) };
-    case 'upsertGoal': {
-      const exists = state.goals.some(g => g.id === action.goal.id);
-      return { ...state, goals: exists ? state.goals.map(g => g.id === action.goal.id ? action.goal : g) : [...state.goals, action.goal] };
-    }
-    case 'deleteGoal':
-      return { ...state, goals: state.goals.filter(g => g.id !== action.goalId) };
     case 'updateSettings':
       return { ...state, settings: { ...state.settings, ...action.patch } };
     case 'restore':
@@ -187,7 +165,7 @@ const Ctx = createContext<StoreCtx | null>(null);
 // localStorage (browser fallback) — never rendered, since StoreProvider gates on `ready`.
 const EMPTY: AppData = {
   schemaVersion: 1, accounts: [], transactions: [], categories: [], rules: [],
-  batches: [], profiles: [], budgets: [], goals: [],
+  batches: [], profiles: [],
   settings: {
     apiFallbackEnabled: false, aiProvider: 'anthropic', householdName: '',
     autoReportEnabled: false, autoReportFolder: '', autoReportLastYM: '',

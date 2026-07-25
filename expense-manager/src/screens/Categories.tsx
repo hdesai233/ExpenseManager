@@ -219,7 +219,7 @@ function DeleteCategoryModal({ category, onClose }: { category: Category; onClos
   const sameLevel = state.categories.filter(c => c.id !== category.id && !!c.parentId === !!category.parentId);
   const [reassignTo, setReassignTo] = useState('');
 
-  const hasImpact = usage.transactions > 0 || usage.splits > 0 || usage.rules > 0 || usage.budgets > 0 || subCount > 0;
+  const hasImpact = usage.transactions > 0 || usage.splits > 0 || usage.rules > 0 || subCount > 0;
 
   const confirm = () => {
     dispatch({ type: 'deleteCategory', categoryId: category.id, reassignTo: reassignTo || null });
@@ -237,7 +237,7 @@ function DeleteCategoryModal({ category, onClose }: { category: Category; onClos
       {hasImpact ? (
         <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginBottom: 14 }}>
           This affects <strong>{usage.transactions}</strong> transaction{usage.transactions === 1 ? '' : 's'}
-          {usage.splits > 0 && <> ({usage.splits} within splits)</>}, <strong>{usage.rules}</strong> rule{usage.rules === 1 ? '' : 's'}, and <strong>{usage.budgets}</strong> budget{usage.budgets === 1 ? '' : 's'}.
+          {usage.splits > 0 && <> ({usage.splits} within splits)</>} and <strong>{usage.rules}</strong> rule{usage.rules === 1 ? '' : 's'}.
         </div>
       ) : (
         <div style={{ fontSize: 12.5, color: 'var(--muted-2)', marginBottom: 14 }}>Nothing currently uses this category — it's safe to remove.</div>
@@ -273,7 +273,7 @@ function MergeCategoryModal({ category, onClose }: { category: Category; onClose
     <Modal title={`Merge "${category.name}" into…`} onClose={onClose}
       footer={<><span /><button className="btn btn-lg" disabled={!intoId} onClick={confirm}>Merge</button></>}>
       <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginBottom: 14 }}>
-        Moves <strong>{usage.transactions}</strong> transaction{usage.transactions === 1 ? '' : 's'}, <strong>{usage.rules}</strong> rule{usage.rules === 1 ? '' : 's'}, and any budget onto the target category
+        Moves <strong>{usage.transactions}</strong> transaction{usage.transactions === 1 ? '' : 's'} and <strong>{usage.rules}</strong> rule{usage.rules === 1 ? '' : 's'} onto the target category
         {isTop && subCount > 0 && <> — its {subCount} subcategor{subCount === 1 ? 'y stays' : 'ies stay'}, just reparented under the target</>}.
         "{category.name}" is then removed.
       </div>

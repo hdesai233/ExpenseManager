@@ -1,4 +1,4 @@
-import type { Account, AppData, Budget, Goal, ImportBatch } from '../types';
+import type { Account, AppData, ImportBatch } from '../types';
 import { addMonths, currentYM, daysInMonth, todayISO, uid } from './format';
 import { ingestRows, type IngestRow } from './ingest';
 import { seedCategories, seedRules } from './seed';
@@ -36,11 +36,6 @@ export function buildSampleData(): AppData {
 
   for (let mi = 5; mi >= 0; mi--) {
     const ym = addMonths(thisYM, -mi);
-
-    // --- income: biweekly payroll into checking + savings interest ---
-    add(day(ym, 1), 'ACME CORP DIR DEP PPD ID 4470', 4470, 'bofa');
-    add(day(ym, 15), 'ACME CORP DIR DEP PPD ID 4470', 4470, 'bofa');
-    add(day(ym, 27), 'INTEREST PAYMENT', jitter(38, 0.15), 'ally');
 
     // --- housing ---
     add(day(ym, 1), 'VENICE PROPERTY MGMT RENT', -1450, 'bofa');
@@ -140,23 +135,6 @@ export function buildSampleData(): AppData {
     }
   }
 
-  const budgets: Budget[] = [
-    { id: uid(), categoryId: 'housing', monthlyLimit: 1900 },
-    { id: uid(), categoryId: 'food', monthlyLimit: 900 },
-    { id: uid(), categoryId: 'shopping', monthlyLimit: 400 },
-    { id: uid(), categoryId: 'transport', monthlyLimit: 450 },
-    { id: uid(), categoryId: 'travel', monthlyLimit: 500 },
-    { id: uid(), categoryId: 'entertainment', monthlyLimit: 150 },
-    { id: uid(), categoryId: 'health', monthlyLimit: 200 },
-    { id: uid(), categoryId: 'subscriptions', monthlyLimit: 180 },
-  ];
-
-  const nowY = Number(todayISO().slice(0, 4));
-  const goals: Goal[] = [
-    { id: uid(), name: 'Emergency Fund', targetAmount: 20000, targetDate: `${nowY}-12-31`, currentAmount: 12400, monthlyContribution: 1600 },
-    { id: uid(), name: `Japan Trip ${nowY}`, targetAmount: 8000, targetDate: `${nowY}-10-15`, currentAmount: 3200, monthlyContribution: 300 },
-  ];
-
   return {
     schemaVersion: 1,
     accounts,
@@ -165,8 +143,6 @@ export function buildSampleData(): AppData {
     rules,
     batches: [batch],
     profiles: [],
-    budgets,
-    goals,
     settings: {
       apiFallbackEnabled: false, aiProvider: 'anthropic', householdName: 'Rivera Household',
       autoReportEnabled: false, autoReportFolder: '', autoReportLastYM: '',

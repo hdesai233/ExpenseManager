@@ -6,6 +6,30 @@ mode (`localStorage`, no encryption, no OS keychain) when run outside
 Electron. This document explains how the pieces fit together and *why* the
 non-obvious decisions were made.
 
+## 0. Scope: expenses only
+
+Ledger deliberately tracks **spending and nothing else**. There is no
+income, savings, net-worth, or budget concept anywhere in the data model,
+and adding one back is a schema change rather than a screen. Every figure
+in the app answers "what did I spend, and how has that changed?" — never
+"am I under a target?".
+
+Two consequences worth knowing before reading further:
+
+- `FlowType` has three values, not four. A deposit has nowhere to go.
+  `merchant_credit` (a refund) nets *against* spend in its category;
+  `transfer` (card payments, account-to-account movement) is excluded from
+  spend entirely. Neither is treated as income.
+- The app is built for **credit-card statement imports**. That's what makes
+  the above safe: on a card statement a positive amount is either a
+  payment or a refund, never a paycheck. `classifyFlow` still parks an
+  unexplained positive amount on a non-card account as a `transfer`, so it
+  can never silently reduce a spend total.
+
+Comparison against history replaces comparison against targets: see
+`categoryMovers`, `spendStats`, `rollingAverage`, and `unusualCharges` in
+`lib/analytics.ts`, surfaced on the Trends screen.
+
 ## 1. Stack
 
 | Layer | Choice | Notes |
@@ -59,7 +83,7 @@ iteration; see the User Guide for why it isn't recommended for real data.
 
 `src/store.tsx` is a single React Context + `useReducer` store holding the
 entire `AppData` object (accounts, transactions, categories, rules,
-batches, profiles, budgets, goals, settings). There's no per-screen local
+batches, profiles, settings). There's no per-screen local
 copy of domain data — every screen reads from and dispatches to this one
 store, which keeps derived views (dashboard totals, review counts,
 category trees) always in sync.
@@ -173,7 +197,7 @@ UI copy should keep saying so rather than overclaiming.
    `lib/ingest.ts`): CSV (PapaParse) or Excel (SheetJS) file → column
    mapping (`ImportProfile`, reusable per account) → normalized rows.
 2. **Classification** (`lib/classify.ts`): each row is classified into a
-   `FlowType` (`expense` / `merchant_credit` / `income` / `transfer`)
+   `FlowType` (`expense` / `merchant_credit` / `transfer`)
    using description-pattern heuristics (payment/transfer/refund regexes)
    plus, for transfers specifically, cross-account pair-matching
    (`findTransferPairs`: a debit on checking/savings + a near-equal credit
@@ -219,7 +243,7 @@ screens:
   is deleted with no reassignment and a `TransactionSplit.categoryId`
   (non-nullable by type) needs somewhere to point.
 - **Delete** cascades to subcategories; the caller must supply a
-  reassignment category for any transactions/splits/rules/budgets
+  reassignment category for any transactions/splits/rules
   currently pointing at the deleted category (or they fall back to
   `'other'`).
 - **Merge** reparents subcategories into the target category instead of
@@ -239,12 +263,12 @@ amounts sum exactly to the transaction total before allowing a save.
 
 `lib/report.ts` is a pure data layer: `buildReport(data, range, title)`
 takes any `AppData` slice and a date range and returns a `ReportData`
-(summary totals, category breakdown, budget-vs-actual, top merchants,
-month-by-month trend, itemized transactions, tax-deductible rows). Four
-templates (`REPORT_TEMPLATES`) reuse the same function with different
-default section toggles and range logic — Monthly and Budget Performance
-default to the current month, Annual to the current year, Custom to a
-user-picked range.
+(summary totals, category breakdown, hierarchical category detail, top
+merchants, month-by-month trend, itemized transactions, tax-deductible
+rows). Four templates (`REPORT_TEMPLATES`) reuse the same function with
+different default section toggles and range logic — Monthly defaults to
+the current month, Annual to the current year, Expense Breakdown to a
+trailing window, Custom to a user-picked range.
 
 Rendering and export live in `src/screens/Reports.tsx`, deliberately kept
 separate from the data layer:

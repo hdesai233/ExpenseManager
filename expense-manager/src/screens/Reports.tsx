@@ -133,7 +133,7 @@ export default function Reports() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             {([
               ['summary', 'Summary'], ['categoryBreakdown', 'Categories'], ['categoryDetail', 'Category detail'],
-              ['categoryTrend', 'Category trend'], ['budgetVsActual', 'Budget vs actual'],
+              ['categoryTrend', 'Category trend'],
               ['topMerchants', 'Top merchants'], ['trend', 'Trend'], ['transactions', 'Itemized transactions'],
             ] as Array<[keyof ReportSections, string]>).map(([key, label]) => (
               <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }}>
@@ -164,10 +164,10 @@ export default function Reports() {
 
           {sections.summary && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 22 }}>
-              <SummaryTile label="Income" value={usd(report.income)} />
-              <SummaryTile label="Expenses" value={usd(report.expense)} />
-              <SummaryTile label="Net" value={(report.net >= 0 ? '+' : '') + usd(report.net)} color={report.net >= 0 ? 'var(--green-ok)' : 'var(--red)'} />
-              <SummaryTile label="Savings rate" value={Math.round(report.savingsRate * 100) + '%'} />
+              <SummaryTile label="Total spent" value={usd(report.expense)} />
+              <SummaryTile label="Charges" value={report.transactionCount.toLocaleString()} />
+              <SummaryTile label="Daily average" value={usd(report.dailyAverage)} />
+              <SummaryTile label="Categories" value={String(report.categoryDetail.length)} />
             </div>
           )}
 
@@ -266,31 +266,6 @@ export default function Reports() {
                 </div>
                 <ChartExportButtons onExport={f => exportChart('stack', f)} />
               </div>
-            </ReportSection>
-          )}
-
-          {sections.budgetVsActual && report.budgetRows.length > 0 && (
-            <ReportSection title="Budget vs. actual">
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--soft-border)' }}>
-                    <th style={{ textAlign: 'left', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Category</th>
-                    <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Actual</th>
-                    <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Budget</th>
-                    <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.budgetRows.map(b => (
-                    <tr key={b.category.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
-                      <td style={{ padding: '6px 0', color: 'var(--ink-3)' }}>{b.category.name}</td>
-                      <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, color: b.over ? 'var(--red)' : 'var(--ink)' }}>{usd(b.actual)}</td>
-                      <td style={{ padding: '6px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{usd(b.target)}</td>
-                      <td style={{ padding: '6px 0', textAlign: 'right', color: b.over ? 'var(--red)' : 'var(--green-conf)' }}>{Math.round(b.pct * 100)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </ReportSection>
           )}
 
@@ -469,7 +444,6 @@ function FilteredExportCard() {
           <select className="input" style={{ width: '100%' }} value={filter.flow ?? 'all'} onChange={e => setFilter(f => ({ ...f, flow: e.target.value as TransactionFilter['flow'] }))}>
             <option value="all">All</option>
             <option value="spending">Spending</option>
-            <option value="income">Income</option>
             <option value="transfers">Transfers</option>
           </select>
         </div>
