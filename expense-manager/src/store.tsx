@@ -39,6 +39,8 @@ type Action =
   | { type: 'editCategory'; categoryId: string; patch: { name?: string; color?: string } }
   | { type: 'deleteCategory'; categoryId: string; reassignTo: string | null }
   | { type: 'mergeCategory'; fromId: string; intoId: string }
+  | { type: 'dismissSubscription'; merchant: string }
+  | { type: 'restoreSubscription'; merchant: string }
   | { type: 'updateSettings'; patch: Partial<Settings> }
   | { type: 'restore'; data: AppData }
   | { type: 'resetAll' };
@@ -190,6 +192,12 @@ function reducer(state: AppData, action: Action): AppData {
       return categoryOps.deleteCategory(state, action.categoryId, action.reassignTo);
     case 'mergeCategory':
       return categoryOps.mergeCategory(state, action.fromId, action.intoId);
+    case 'dismissSubscription': {
+      if (state.settings.dismissedSubscriptions.includes(action.merchant)) return state;
+      return { ...state, settings: { ...state.settings, dismissedSubscriptions: [...state.settings.dismissedSubscriptions, action.merchant] } };
+    }
+    case 'restoreSubscription':
+      return { ...state, settings: { ...state.settings, dismissedSubscriptions: state.settings.dismissedSubscriptions.filter(m => m !== action.merchant) } };
     case 'updateSettings':
       return { ...state, settings: { ...state.settings, ...action.patch } };
     case 'restore':
@@ -212,6 +220,7 @@ function withSettingsDefaults(data: AppData): AppData {
     settings.aiProvider = 'anthropic';
   }
   if (!settings.aiModels || typeof settings.aiModels !== 'object') settings.aiModels = {};
+  if (!Array.isArray(settings.dismissedSubscriptions)) settings.dismissedSubscriptions = [];
   return { ...data, settings };
 }
 
@@ -229,7 +238,7 @@ const EMPTY: AppData = {
   batches: [], profiles: [],
   settings: {
     apiFallbackEnabled: false, aiProvider: 'anthropic', aiModels: {}, householdName: '',
-    autoReportEnabled: false, autoReportFolder: '', autoReportLastYM: '',
+    autoReportEnabled: false, autoReportFolder: '', autoReportLastYM: '', dismissedSubscriptions: [],
   },
 };
 

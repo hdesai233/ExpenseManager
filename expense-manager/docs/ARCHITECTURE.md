@@ -277,6 +277,27 @@ aggregates with the imported "SQ *STARBUCKS #4471". `importBatchId` is the
 `MANUAL_BATCH_ID` sentinel; nothing dereferences that field, so no
 `ImportBatch` row is fabricated to match it.
 
+### 6b. Subscription detection and dismissal
+
+`detectRecurring()` (`lib/analytics.ts`) is never persisted — it re-scans
+`state.transactions` on every render of the Subscriptions screen,
+clustering by merchant + amount + interval. That's deliberate: a
+detected subscription isn't really *data*, it's a live inference, and
+storing it would just be a snapshot that goes stale the moment a new
+charge lands.
+
+The one part of "subscriptions" that genuinely needs to survive a reload
+is which merchants the user has said *aren't* one — a garage charged
+monthly, say, matches the same weekly/monthly/annual clustering a real
+subscription would. That list, `settings.dismissedSubscriptions: string[]`
+(normalized merchant names), is a plain settings field following the same
+pattern as `aiModels`: added to `EMPTY`/`sample.ts`, backfilled in
+`withSettingsDefaults` for older snapshots, and read/written in `db.cjs`
+via a `parseJsonArray()` tolerant parser (the array-shaped sibling of
+`parseJsonObject()`). The Subscriptions screen filters `detectRecurring`'s
+output against this list rather than the detector needing to know
+anything about dismissal itself.
+
 ## 7. Categories, splits, and referential integrity
 
 Category CRUD (`lib/categoryOps.ts`) is written as pure functions so

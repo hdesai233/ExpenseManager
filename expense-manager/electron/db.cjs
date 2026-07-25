@@ -146,6 +146,17 @@ function parseJsonObject(raw) {
   }
 }
 
+/** Tolerant JSON-array read for settings values written by a newer/older build. */
+function parseJsonArray(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function isEmpty() {
   const row = db.prepare('SELECT COUNT(*) as n FROM accounts').get();
   return row.n === 0;
@@ -213,6 +224,7 @@ function loadSnapshot() {
     autoReportEnabled: settingsMap.autoReportEnabled === '1',
     autoReportFolder: settingsMap.autoReportFolder ?? '',
     autoReportLastYM: settingsMap.autoReportLastYM ?? '',
+    dismissedSubscriptions: parseJsonArray(settingsMap.dismissedSubscriptions),
   };
 
   return { schemaVersion: APP_DATA_VERSION, accounts, transactions, categories, rules, batches, profiles, settings };
@@ -264,6 +276,7 @@ function saveSnapshot(data) {
     insSetting.run('autoReportEnabled', data.settings.autoReportEnabled ? '1' : '0');
     insSetting.run('autoReportFolder', data.settings.autoReportFolder ?? '');
     insSetting.run('autoReportLastYM', data.settings.autoReportLastYM ?? '');
+    insSetting.run('dismissedSubscriptions', JSON.stringify(data.settings.dismissedSubscriptions ?? []));
 
     db.exec('COMMIT');
   } catch (e) {

@@ -125,6 +125,13 @@ export interface Settings {
   autoReportEnabled: boolean;
   autoReportFolder: string;
   autoReportLastYM: string;
+  /**
+   * Merchants (by normalized name) excluded from the Subscriptions screen's recurring-charge
+   * detection — for false positives like a weekly grocery run that happens to fall on a regular
+   * cadence. Detection itself is never persisted (it's recomputed from transactions every time);
+   * this dismissal list is the only part of "subscriptions" that needs to survive a reload.
+   */
+  dismissedSubscriptions: string[];
 }
 
 export interface AppData {

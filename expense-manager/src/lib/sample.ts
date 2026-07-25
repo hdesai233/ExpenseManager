@@ -145,7 +145,7 @@ export function buildSampleData(): AppData {
     profiles: [],
     settings: {
       apiFallbackEnabled: false, aiProvider: 'anthropic', aiModels: {}, householdName: 'Rivera Household',
-      autoReportEnabled: false, autoReportFolder: '', autoReportLastYM: '',
+      autoReportEnabled: false, autoReportFolder: '', autoReportLastYM: '', dismissedSubscriptions: [],
     },
   };
 }

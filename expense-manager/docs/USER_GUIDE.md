@@ -154,6 +154,13 @@ Ledger looks at your transaction history for recurring, same-merchant,
 similar-amount charges and lists them as detected subscriptions, so you
 can spot ones you forgot about.
 
+Detection is automatic and can occasionally flag something that isn't
+really a subscription — a garage you park at every month, say. Click the
+**×** on any row to remove it from the list. Dismissed merchants are
+remembered, so they won't come back the next time detection runs; click
+**"Show not-a-subscription list"** at the bottom of the screen to see
+everything you've dismissed and **Restore** one if you change your mind.
+
 ## 8. Analytics & Dashboard
 
 **Dashboard** gives you an at-a-glance monthly view: what you spent and
