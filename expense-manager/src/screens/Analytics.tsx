@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import { addMonths, currentYM, monthShort, monthYearFull, usd } from '../lib/format';
-import { categorySpend, dailySpendByAccount, forecastMonthSpend, monthlySeries, monthlySpend, topMerchants } from '../lib/analytics';
+import {
+  categorySpend, dailySpendByAccount, forecastMonthSpend, merchantTrends, monthlySeries,
+  monthlySpend, spendPace, topMerchants,
+} from '../lib/analytics';
 import { categoryName, useStore } from '../store';
 import { StackedBarChart, TrendChart } from '../components/ui';
 
@@ -56,6 +59,16 @@ export default function Analytics() {
   const { days, series: accountSeries } = useMemo(() => dailySpendByAccount(txns, state.accounts, dailyYm), [txns, state.accounts, dailyYm]);
   const dailyTotal = accountSeries.reduce((a, s) => a + s.values.reduce((x, y) => x + y, 0), 0);
   const dailyLabels = days.map(String);
+
+  // ---- spend pace: this month's cumulative spend vs. the average of the prior 3 months ----
+  const pace = useMemo(() => spendPace(txns, dailyYm, 3), [txns, dailyYm]);
+  const paceIsCurrentMonth = dailyYm === ym;
+  const paceLabels = pace.days.map(String);
+  const paceSeries = paceLabels.map((label, i) => ({ label, value: pace.current[i] }));
+
+  // ---- merchant trend: recent vs. prior 3-month window, matched onto the top-merchants list ----
+  const merchTrends = useMemo(() => merchantTrends(txns, ym, 3), [txns, ym]);
+  const trendByMerchant = new Map(merchTrends.map(t => [t.name, t]));
 
   return (
     <div className="page">
@@ -125,6 +138,37 @@ export default function Analytics() {
         )}
       </div>
 
+      <div className="card" style={{ padding: '20px 22px', marginBottom: 14 }}>
+        <div className="card-title" style={{ fontSize: 15, marginBottom: 4 }}>Spend pace — {monthYearFull(dailyYm)}</div>
+        {pace.priorMonthCount === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '20px 0', textAlign: 'center' }}>
+            Not enough prior months to compare pace against yet.
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 4 }}>
+              {paceIsCurrentMonth
+                ? `Through day ${pace.throughDay}, `
+                : `By month-end, this month `}
+              {pace.paceDelta !== null && (
+                <>
+                  {paceIsCurrentMonth ? "you're " : 'ended '}
+                  <strong style={{ color: pace.paceDelta > 0 ? 'var(--red)' : 'var(--green-ok)' }}>
+                    {usd(Math.abs(pace.paceDelta))} {pace.paceDelta > 0 ? 'above' : 'below'}
+                  </strong>{' '}
+                  your typical pace (avg of the last {pace.priorMonthCount} month{pace.priorMonthCount === 1 ? '' : 's'}).
+                </>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 10 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--muted)' }}><span style={{ width: 14, height: 2, background: 'var(--green)', borderRadius: 2 }} />{monthYearFull(dailyYm)}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--muted)' }}><span style={{ width: 14, height: 2, background: '#c9c4ba', borderRadius: 2 }} />Avg of prior {pace.priorMonthCount} month{pace.priorMonthCount === 1 ? '' : 's'}</span>
+            </div>
+            <TrendChart width={900} height={200} series={paceSeries} compare={pace.priorAvg} forecastIndex={paceSeries.length} yTicks />
+          </>
+        )}
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
         <div className="card" style={{ padding: '20px 22px' }}>
           <div className="card-title" style={{ fontSize: 15, marginBottom: 16 }}>Spend by month</div>
@@ -146,22 +190,35 @@ export default function Analytics() {
         <div className="card" style={{ padding: '20px 22px' }}>
           <div className="card-title" style={{ fontSize: 15, marginBottom: 16 }}>Top merchants</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {top.map(m => (
-              <div key={m.name}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-                  <span style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500 }}>{m.name}</span>
-                  <span style={{ fontSize: 12.5, color: 'var(--ink)', fontWeight: 600 }}>{usd(m.amount)}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                  <div className="bar-track" style={{ flex: 1 }}>
-                    <div className="bar-fill" style={{ width: `${(m.amount / topMax * 100).toFixed(0)}%`, background: 'var(--green-2)' }} />
+            {top.map(m => {
+              const trend = trendByMerchant.get(m.name);
+              return (
+                <div key={m.name}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {m.name}
+                      {trend && trend.countDelta !== 0 && (
+                        <span
+                          title={`${trend.recentCount}× recently vs. ${trend.priorCount}× before`}
+                          style={{ fontSize: 10.5, fontWeight: 700, color: trend.countDelta > 0 ? 'var(--red)' : 'var(--green-ok)' }}
+                        >
+                          {trend.countDelta > 0 ? '▲' : '▼'} {Math.abs(trend.countDelta)}
+                        </span>
+                      )}
+                    </span>
+                    <span style={{ fontSize: 12.5, color: 'var(--ink)', fontWeight: 600 }}>{usd(m.amount)}</span>
                   </div>
-                  <span style={{ fontSize: 10.5, color: 'var(--muted-2)', width: 110, textAlign: 'right' }} className="ellip">
-                    {m.count}× · {categoryName(state, m.categoryId)}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                    <div className="bar-track" style={{ flex: 1 }}>
+                      <div className="bar-fill" style={{ width: `${(m.amount / topMax * 100).toFixed(0)}%`, background: 'var(--green-2)' }} />
+                    </div>
+                    <span style={{ fontSize: 10.5, color: 'var(--muted-2)', width: 110, textAlign: 'right' }} className="ellip">
+                      {m.count}× · {categoryName(state, m.categoryId)}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

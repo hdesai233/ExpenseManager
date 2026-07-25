@@ -27,8 +27,22 @@ Two consequences worth knowing before reading further:
   can never silently reduce a spend total.
 
 Comparison against history replaces comparison against targets: see
-`categoryMovers`, `spendStats`, `rollingAverage`, and `unusualCharges` in
-`lib/analytics.ts`, surfaced on the Trends screen.
+`categoryMovers`, `spendStats`, `rollingAverage`, `unusualCharges`,
+`categoryAnomalies`, `dayOfWeekSpend`, `spendPace`, and `merchantTrends`
+in `lib/analytics.ts`, surfaced on the Trends and Analytics screens.
+
+A recurring hazard across all of these: never construct a `Date` from a
+raw ISO string (`new Date(t.date)`) — `Date` parses a bare `YYYY-MM-DD`
+string as UTC midnight, and in any timezone behind UTC that's the
+*previous* local calendar day, silently shifting weekday/day-of-month
+math by one. `dayOfWeekSpend`'s `isoWeekday()` helper and every date
+constructor in `format.ts` build `Date`s from explicit parsed `(year,
+monthIndex, day)` components instead, which `Date` always treats as
+local time. This isn't theoretical — an early version of
+`dayOfWeekSpend`'s own *test harness* (not the function) hit exactly
+this bug, misattributing a large chunk of spend to the wrong weekday
+under a UTC-4 test environment, and it looked entirely plausible until
+cross-checked against a timezone-safe recomputation.
 
 ## 1. Stack
 

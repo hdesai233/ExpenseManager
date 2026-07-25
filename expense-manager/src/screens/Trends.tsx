@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
-  categoryMovers, categorySpend, monthlySeries, rollingAverage, spendStats, unusualCharges,
+  categoryAnomalies, categoryMovers, categorySpend, dayOfWeekSpend, monthlySeries,
+  rollingAverage, spendStats, unusualCharges,
 } from '../lib/analytics';
 import { currentYM, monthLabel, monthShort, shortDate, usd } from '../lib/format';
 import { categoryName, useStore } from '../store';
@@ -24,6 +25,8 @@ export default function Trends() {
   const rolling = useMemo(() => rollingAverage(series, 3), [series]);
   const movers = useMemo(() => categoryMovers(txns, state.categories, ym), [txns, state.categories, ym]);
   const outliers = useMemo(() => unusualCharges(txns, ym), [txns, ym]);
+  const weekdays = useMemo(() => dayOfWeekSpend(txns, months, ym), [txns, months, ym]);
+  const catAnomalies = useMemo(() => categoryAnomalies(txns, state.categories, ym), [txns, state.categories, ym]);
 
   // Per-category totals across the window, biggest first — the "where does it all go" view.
   const topCategories = useMemo(() => {
@@ -150,6 +153,54 @@ export default function Trends() {
             </div>
           </div>
 
+          {/* day-of-week pattern + category-level anomalies */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: 14, marginBottom: 14 }}>
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 4 }}>Spend by day of week</div>
+              <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 16 }}>
+                Average spend per weekday, not the raw total — so a window with, say, five Fridays
+                and four Sundays doesn't make Fridays look artificially bigger.
+              </div>
+              <WeekdayBars rows={weekdays} />
+            </div>
+
+            <div className="card">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <div className="card-title">Unusual category spend this month</div>
+                {catAnomalies.length > 0 && <span className="pill-count">{catAnomalies.length}</span>}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 12 }}>
+                Categories spending well above their own 6-month median — steadier than "vs. last
+                month" alone, since one unusually cheap or pricey prior month can't swing it.
+              </div>
+              {catAnomalies.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>
+                  Nothing out of the ordinary this month.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {catAnomalies.slice(0, 8).map(a => (
+                    <div key={a.category.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 2px', borderTop: '1px solid #f2efe8' }}>
+                      <span className="dot" style={{ width: 8, height: 8, background: a.category.color, flex: 'none' }} />
+                      <div className="ellip" style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--ink-3)', fontWeight: 500 }}>
+                        {a.category.name}
+                      </div>
+                      <div style={{ textAlign: 'right', fontSize: 11.5, color: 'var(--muted-2)', flex: 'none' }}>
+                        usually {usd(a.typicalAmount)}
+                      </div>
+                      <div style={{ width: 70, textAlign: 'right', fontSize: 13.5, fontWeight: 600, color: 'var(--red)', flex: 'none' }}>
+                        {usd(a.amount)}
+                      </div>
+                      <span className="tag-badge" style={{ flex: 'none', color: 'var(--amber)', background: 'var(--amber-bg)' }}>
+                        {a.ratio.toFixed(1)}×
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* unusual charges */}
           <div className="card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -157,8 +208,8 @@ export default function Trends() {
               {outliers.length > 0 && <span className="pill-count">{outliers.length}</span>}
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 12 }}>
-              Charges well above what that merchant usually costs. A merchant needs at least three prior
-              charges before it can be flagged, so new merchants never show up here.
+              Individual charges well above what that merchant usually costs. A merchant needs at
+              least three prior charges before it can be flagged, so new merchants never show up here.
             </div>
             {outliers.length === 0 ? (
               <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>
@@ -192,6 +243,34 @@ export default function Trends() {
         </>
       )}
     </div>
+  );
+}
+
+function WeekdayBars({ rows }: { rows: Array<{ weekday: number; label: string; average: number; occurrences: number }> }) {
+  const max = Math.max(...rows.map(r => r.average), 1);
+  const peak = rows.reduce((a, r) => (r.average > a.average ? r : a), rows[0]);
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: 110, gap: 10 }}>
+        {rows.map(r => (
+          <div key={r.weekday} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', height: 96 }}>
+              <div
+                title={`${usd(r.average)} avg over ${r.occurrences} ${r.label}s`}
+                style={{
+                  width: 22, borderRadius: '3px 3px 0 0', height: `${Math.max(r.average / max * 96, 2).toFixed(0)}px`,
+                  background: r.weekday === peak.weekday ? 'var(--green)' : 'var(--green-2)',
+                }}
+              />
+            </div>
+            <span style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>{r.label}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #f2efe8', fontSize: 11.5, color: 'var(--muted)' }}>
+        Highest: {peak.label} · {usd(peak.average)} avg
+      </div>
+    </>
   );
 }
 

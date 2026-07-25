@@ -57,6 +57,112 @@ export function dailySpendByAccount(txns: Transaction[], accounts: Account[], ym
   return { days, series };
 }
 
+export interface SpendPace {
+  days: number[];
+  current: Array<number | null>;   // cumulative spend through each day of `ym`; null past "today" for the current month
+  priorAvg: Array<number | null>;  // average cumulative curve across `priorMonthCount` earlier months, aligned by day-of-month
+  priorMonthCount: number;
+  paceDelta: number | null;        // current cumulative minus the prior average at the same point — null with no prior history
+  throughDay: number;              // the last day `current`/`paceDelta` reflect — "today" for the current month, else the full month
+}
+
+/**
+ * Cumulative spend by day-of-month, for pacing: "by day 10 I've already spent what I usually
+ * spend by day 18". A prior month shorter than `ym` holds its final cumulative value flat once
+ * its own days run out, rather than going null, so the compare line stays continuous.
+ */
+export function spendPace(txns: Transaction[], ym: string, monthsBack = 3): SpendPace {
+  const dim = daysInMonth(ym);
+  const days = Array.from({ length: dim }, (_, i) => i + 1);
+  const isCurrentMonth = ym === currentYM();
+  const todayDay = isCurrentMonth ? Number(todayISO().slice(8, 10)) : dim;
+
+  const dailyCurrent = new Array(dim).fill(0);
+  for (const t of txnsInMonth(txns, ym)) {
+    dailyCurrent[Number(t.date.slice(8, 10)) - 1] += spendOf(t);
+  }
+  let running = 0;
+  const current: Array<number | null> = dailyCurrent.map((v, i) => {
+    if (i + 1 > todayDay) return null;
+    running += v;
+    return running;
+  });
+
+  const priorCurves: number[][] = [];
+  for (let i = 1; i <= monthsBack; i++) {
+    const pym = addMonths(ym, -i);
+    const priorTxns = txnsInMonth(txns, pym);
+    if (priorTxns.length === 0) continue; // no data that far back — don't let it drag the average toward zero
+    const pdim = daysInMonth(pym);
+    const pDaily = new Array(pdim).fill(0);
+    for (const t of priorTxns) pDaily[Number(t.date.slice(8, 10)) - 1] += spendOf(t);
+    let run = 0;
+    const cum = pDaily.map(v => { run += v; return run; });
+    priorCurves.push(days.map((_, idx) => cum[Math.min(idx, pdim - 1)]));
+  }
+
+  const priorAvg: Array<number | null> = days.map((_, idx) =>
+    priorCurves.length === 0 ? null : priorCurves.reduce((a, c) => a + c[idx], 0) / priorCurves.length,
+  );
+
+  const latestCurrent = current[todayDay - 1];
+  const priorAtSameDay = priorAvg[todayDay - 1];
+  const paceDelta = latestCurrent !== null && priorAtSameDay !== null ? latestCurrent - priorAtSameDay : null;
+
+  return { days, current, priorAvg, priorMonthCount: priorCurves.length, paceDelta, throughDay: todayDay };
+}
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+export interface WeekdaySpend { weekday: number; label: string; total: number; occurrences: number; average: number }
+
+/** Parse an ISO date as a *local* calendar date, matching how the rest of this file avoids
+ * `new Date(isoString)` (which parses as UTC and can shift the weekday by one near midnight). */
+function isoWeekday(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+/**
+ * Average spend per weekday (Sun–Sat) over a trailing window of months. `average` divides by how
+ * many times that weekday actually occurred in the window, not by transaction count, so a weekday
+ * with zero spend on some dates still pulls the average down instead of being silently excluded.
+ */
+export function dayOfWeekSpend(txns: Transaction[], months: number, anchorYm?: string): WeekdaySpend[] {
+  const anchor = anchorYm ?? currentYM();
+  const startYm = addMonths(anchor, -(months - 1));
+  const isCurrent = anchor === currentYM();
+  const endDay = isCurrent ? Number(todayISO().slice(8, 10)) : daysInMonth(anchor);
+
+  const [sy, sm] = startYm.split('-').map(Number);
+  const [ey, em] = anchor.split('-').map(Number);
+  const startDate = new Date(sy, sm - 1, 1);
+  const endDate = new Date(ey, em - 1, endDay);
+
+  const totals = new Array(7).fill(0);
+  const occurrences = new Array(7).fill(0);
+  for (const cur = new Date(startDate); cur <= endDate; cur.setDate(cur.getDate() + 1)) {
+    occurrences[cur.getDay()]++;
+  }
+
+  const startISO = `${startYm}-01`;
+  const endISO = `${anchor}-${String(endDay).padStart(2, '0')}`;
+  for (const t of txns) {
+    if (t.date < startISO || t.date > endISO) continue;
+    const amt = spendOf(t);
+    if (amt === 0) continue;
+    totals[isoWeekday(t.date)] += amt;
+  }
+
+  return totals.map((total, weekday) => ({
+    weekday,
+    label: WEEKDAY_LABELS[weekday],
+    total,
+    occurrences: occurrences[weekday],
+    average: occurrences[weekday] > 0 ? total / occurrences[weekday] : 0,
+  }));
+}
+
 export interface CatSpend { category: Category; amount: number; pct: number }
 
 /** Per-category expense contribution of a transaction — splits distribute across their own categories. */
@@ -156,6 +262,65 @@ export function topMerchants(txns: Transaction[], sinceYM: string, limit: number
     map.set(key, cur);
   }
   return [...map.values()].filter(m => m.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, limit);
+}
+
+export interface MerchantTrend {
+  name: string;
+  categoryId: string | null;
+  recentAmount: number;
+  recentCount: number;
+  priorAmount: number;
+  priorCount: number;
+  amountDelta: number;
+  countDelta: number;
+}
+
+/**
+ * Recent vs. prior window per merchant. A merchant's total can hold steady while its frequency
+ * changes underneath it (fewer, bigger trips vs. more, smaller ones) — invisible from a plain
+ * top-merchants-by-amount ranking, which is why this tracks count alongside amount.
+ */
+export function merchantTrends(txns: Transaction[], ym: string, windowMonths = 3): MerchantTrend[] {
+  const recentStart = addMonths(ym, -(windowMonths - 1));
+  const priorEnd = addMonths(recentStart, -1);
+  const priorStart = addMonths(priorEnd, -(windowMonths - 1));
+
+  const bucket = (fromYm: string, toYm: string) => {
+    const map = new Map<string, { amount: number; count: number; categoryId: string | null }>();
+    for (const t of txns) {
+      if (!isSpend(t)) continue;
+      const tym = toYM(t.date);
+      if (tym < fromYm || tym > toYm) continue;
+      const cur = map.get(t.merchantNormalized) ?? { amount: 0, count: 0, categoryId: t.categoryId };
+      cur.amount += spendOf(t);
+      if (t.amount < 0) cur.count += 1; // count charges, not refunds
+      if (t.categoryId) cur.categoryId = t.categoryId;
+      map.set(t.merchantNormalized, cur);
+    }
+    return map;
+  };
+
+  const recent = bucket(recentStart, ym);
+  const prior = bucket(priorStart, priorEnd);
+
+  const out: MerchantTrend[] = [];
+  for (const name of new Set([...recent.keys(), ...prior.keys()])) {
+    const r = recent.get(name);
+    const p = prior.get(name);
+    // needs at least 2 charges somewhere so a single one-off purchase never reads as "trending"
+    if ((r?.count ?? 0) < 2 && (p?.count ?? 0) < 2) continue;
+    out.push({
+      name,
+      categoryId: r?.categoryId ?? p?.categoryId ?? null,
+      recentAmount: r?.amount ?? 0,
+      recentCount: r?.count ?? 0,
+      priorAmount: p?.amount ?? 0,
+      priorCount: p?.count ?? 0,
+      amountDelta: (r?.amount ?? 0) - (p?.amount ?? 0),
+      countDelta: (r?.count ?? 0) - (p?.count ?? 0),
+    });
+  }
+  return out.sort((a, b) => Math.abs(b.amountDelta) - Math.abs(a.amountDelta));
 }
 
 // ---- Recurring / subscription detection (§4.8: merchant + amount + interval clustering) ----
@@ -338,6 +503,45 @@ export function unusualCharges(txns: Transaction[], ym: string, minRatio = 2): O
     if (merchantMedian <= 0.005) continue;
     const ratio = amt / merchantMedian;
     if (ratio >= minRatio) out.push({ txn: t, merchantMedian, ratio });
+  }
+  return out.sort((a, b) => b.ratio - a.ratio);
+}
+
+export interface CategoryAnomaly {
+  category: Category;
+  amount: number;
+  typicalAmount: number;
+  ratio: number;
+  monthsCompared: number;
+}
+
+/**
+ * Categories spending well above their own recent history — the category-level analogue of
+ * unusualCharges, but comparing against a multi-month median rather than the single prior month
+ * categoryMovers uses, so one unusually cheap or expensive prior month can't swing the comparison.
+ * Only flags "spent more than usual"; "less than usual" is already covered by categoryMovers.
+ */
+export function categoryAnomalies(
+  txns: Transaction[], categories: Category[], ym: string, monthsBack = 6, minRatio = 1.5, minDelta = 30,
+): CategoryAnomaly[] {
+  const out: CategoryAnomaly[] = [];
+  for (const category of categories.filter(c => !c.parentId)) {
+    const current = categorySpend(txns, category.id, ym);
+    if (current <= 0.005) continue;
+
+    const hist: number[] = [];
+    for (let i = 1; i <= monthsBack; i++) {
+      const v = categorySpend(txns, category.id, addMonths(ym, -i));
+      if (v > 0.005) hist.push(v);
+    }
+    if (hist.length < 3) continue; // not enough history to call anything "unusual" with confidence
+
+    const typicalAmount = median(hist);
+    if (typicalAmount <= 0.005) continue;
+    const ratio = current / typicalAmount;
+    if (ratio >= minRatio && current - typicalAmount >= minDelta) {
+      out.push({ category, amount: current, typicalAmount, ratio, monthsCompared: hist.length });
+    }
   }
   return out.sort((a, b) => b.ratio - a.ratio);
 }

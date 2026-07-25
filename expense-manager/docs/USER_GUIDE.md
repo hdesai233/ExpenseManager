@@ -133,10 +133,20 @@ you get:
 - **Spending more / Spending less** — the categories that moved most
   versus last month, with the before and after figures.
 - **Category mix by month** and **total by category** for the window.
-- **Unusual charges** — individual charges well above what that merchant
-  normally costs you. A merchant needs at least three previous charges
-  before it can be flagged, so a first-time merchant is never called
-  unusual just for being new.
+- **Spend by day of week** — your average spend per weekday, so patterns
+  like weekend dining or Friday impulse buys show up even though a
+  monthly view smooths them out. This is an *average per occurrence*,
+  not a raw total, so an uneven number of, say, Fridays vs. Sundays in
+  the window doesn't skew it.
+- **Unusual category spend this month** — a category running well above
+  its own 6-month median, not just above last month. This catches drift
+  a single month-over-month comparison can miss, since one unusually
+  cheap or expensive prior month can't swing a median the way it can
+  swing a one-month comparison.
+- **Unusual charges this month** — individual charges well above what
+  that specific merchant normally costs you. A merchant needs at least
+  three previous charges before it can be flagged, so a first-time
+  merchant is never called unusual just for being new.
 
 ## 7. Subscriptions
 
@@ -151,8 +161,13 @@ across how many charges, how that compares with your recent average, the
 category that moved most, a projection for the month, your category
 breakdown, and what changed versus last month. **Analytics** goes deeper
 — spend by month, a day-by-day breakdown of one month split by account
-(navigate with the arrows next to the month label), merchant breakdowns,
-and a what-if simulator for modelling a spending cut.
+(navigate with the arrows next to the month label), a **spend pace**
+chart comparing that month's running total against the average of the
+prior three months at the same point ("through day 18 you're $140 above
+your typical pace" — an early warning, not just a month-end summary),
+merchant breakdowns (with a ▲/▼ badge when a merchant's visit frequency
+has shifted from its prior 3-month window), and a what-if simulator for
+modelling a spending cut.
 
 ## 9. Reports & Export
 
