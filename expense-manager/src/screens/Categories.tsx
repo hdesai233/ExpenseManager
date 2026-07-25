@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { isSpend } from '../lib/analytics';
 import { categoryNameTaken, categoryUsage, isProtectedCategory, type CategoryUsage } from '../lib/categoryOps';
+import { uid } from '../lib/format';
 import { Modal } from '../components/ui';
 import type { Category, MatchType } from '../types';
 
@@ -18,8 +19,21 @@ export default function Categories() {
   const { state, dispatch } = useStore();
   const [ruleModal, setRuleModal] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
-  const topCats = state.categories.filter(c => !c.parentId);
+  useEffect(() => {
+    if (!highlightId) return;
+    rowRefs.current.get(highlightId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const t = setTimeout(() => setHighlightId(null), 1800);
+    return () => clearTimeout(t);
+  }, [highlightId]);
+
+  // Newly added categories are appended at the end of the array; keep the protected
+  // "Other / Uncategorized" bucket last regardless, so new categories don't land after it
+  // and look like a stray entry past the list's natural floor.
+  const topCats = [...state.categories.filter(c => !c.parentId)]
+    .sort((a, b) => Number(isProtectedCategory(a.id)) - Number(isProtectedCategory(b.id)));
   const countByCat = new Map<string, number>();
   for (const t of state.transactions) {
     if (!isSpend(t) || !t.categoryId) continue;
@@ -52,6 +66,8 @@ export default function Categories() {
                 <div key={c.id}>
                   <CategoryRow
                     category={c} count={countByCat.get(c.id) ?? 0}
+                    rowRef={el => { if (el) rowRefs.current.set(c.id, el); else rowRefs.current.delete(c.id); }}
+                    highlighted={highlightId === c.id}
                     onAddSub={() => setModal({ kind: 'add', parentId: c.id })}
                     onEdit={() => setModal({ kind: 'edit', category: c })}
                     onMerge={() => setModal({ kind: 'merge', category: c })}
@@ -61,6 +77,8 @@ export default function Categories() {
                   {subs.map(s => (
                     <CategoryRow
                       key={s.id} category={s} count={countByCat.get(s.id) ?? 0} indent
+                      rowRef={el => { if (el) rowRefs.current.set(s.id, el); else rowRefs.current.delete(s.id); }}
+                      highlighted={highlightId === s.id}
                       onEdit={() => setModal({ kind: 'edit', category: s })}
                       onMerge={() => setModal({ kind: 'merge', category: s })}
                       onDelete={() => setModal({ kind: 'delete', category: s })}
@@ -102,7 +120,7 @@ export default function Categories() {
       </div>
 
       {ruleModal && <NewRuleModal onClose={() => setRuleModal(false)} />}
-      {modal?.kind === 'add' && <CategoryFormModal parentId={modal.parentId} onClose={() => setModal(null)} />}
+      {modal?.kind === 'add' && <CategoryFormModal parentId={modal.parentId} onClose={() => setModal(null)} onAdded={setHighlightId} />}
       {modal?.kind === 'edit' && <CategoryFormModal category={modal.category} onClose={() => setModal(null)} />}
       {modal?.kind === 'delete' && <DeleteCategoryModal category={modal.category} onClose={() => setModal(null)} />}
       {modal?.kind === 'merge' && <MergeCategoryModal category={modal.category} onClose={() => setModal(null)} />}
@@ -110,13 +128,16 @@ export default function Categories() {
   );
 }
 
-function CategoryRow({ category, count, indent, onAddSub, onEdit, onMerge, onDelete, onToggleTax }: {
-  category: Category; count: number; indent?: boolean;
+function CategoryRow({ category, count, indent, rowRef, highlighted, onAddSub, onEdit, onMerge, onDelete, onToggleTax }: {
+  category: Category; count: number; indent?: boolean; rowRef?: (el: HTMLDivElement | null) => void; highlighted?: boolean;
   onAddSub?: () => void; onEdit: () => void; onMerge: () => void; onDelete: () => void; onToggleTax: (v: boolean) => void;
 }) {
   const protectedCat = isProtectedCategory(category.id);
   return (
-    <div className="hover-row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: indent ? '7px 10px 7px 30px' : '9px 10px', borderRadius: 10 }}>
+    <div ref={rowRef} className="hover-row" style={{
+      display: 'flex', alignItems: 'center', gap: 9, padding: indent ? '7px 10px 7px 30px' : '9px 10px', borderRadius: 10,
+      background: highlighted ? 'var(--amber-bg)' : undefined, transition: 'background 0.4s ease',
+    }}>
       <span className="dot" style={{ width: indent ? 8 : 11, height: indent ? 8 : 11, background: category.color }} />
       <div className="ellip" style={{ flex: 1, fontSize: indent ? 12.5 : 13.5, fontWeight: indent ? 450 : 500, color: 'var(--ink-2)' }}>{category.name}</div>
       <label title="Include in tax-relevant exports" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: category.taxDeductible ? 'var(--green)' : 'var(--muted-2)', cursor: 'pointer', flex: 'none' }}>
@@ -143,7 +164,7 @@ function IconButton({ title, onClick, danger, children }: { title: string; onCli
   );
 }
 
-function CategoryFormModal({ category, parentId, onClose }: { category?: Category; parentId?: string | null; onClose: () => void }) {
+function CategoryFormModal({ category, parentId, onClose, onAdded }: { category?: Category; parentId?: string | null; onClose: () => void; onAdded?: (id: string) => void }) {
   const { state, dispatch } = useStore();
   const isEdit = !!category;
   const effectiveParentId = category ? category.parentId : (parentId ?? null);
@@ -163,7 +184,9 @@ function CategoryFormModal({ category, parentId, onClose }: { category?: Categor
     if (isEdit) {
       dispatch({ type: 'editCategory', categoryId: category.id, patch: { name: trimmed, color } });
     } else {
-      dispatch({ type: 'addCategory', name: trimmed, color, parentId: effectiveParentId });
+      const id = uid();
+      dispatch({ type: 'addCategory', id, name: trimmed, color, parentId: effectiveParentId });
+      onAdded?.(id);
     }
     onClose();
   };

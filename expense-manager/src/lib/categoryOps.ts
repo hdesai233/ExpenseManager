@@ -54,8 +54,8 @@ function descendantIds(categories: Category[], id: string): Set<string> {
 
 // ---- Add / edit ----
 
-export function addCategory(data: AppData, name: string, color: string, parentId: string | null): AppData {
-  const category: Category = { id: uid(), name: name.trim(), parentId, color };
+export function addCategory(data: AppData, name: string, color: string, parentId: string | null, id?: string): AppData {
+  const category: Category = { id: id ?? uid(), name: name.trim(), parentId, color };
   return { ...data, categories: [...data.categories, category] };
 }
 
