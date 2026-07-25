@@ -66,6 +66,11 @@ export default function Reports() {
     if (svg) downloadSvgAsImage(svg, `ledger-${which}-${range.start}`, format);
   };
 
+  // The two month-over-month sections need more than one month of range to plot anything.
+  // Monthly Summary (and Expense Breakdown set to "1 month") produce a single-point report.trend,
+  // which used to make these checkboxes silently do nothing instead of explaining why.
+  const canTrend = report.trend.length > 1;
+
   const catColor = (c: { category: { id: string; color: string } }, i: number) => c.category.color || CAT_COLORS[i % CAT_COLORS.length];
   const donutSlices = report.categories.slice(0, 9).map((c, i) => ({ color: catColor(c, i), pct: c.pct, label: c.category.name }));
   const trendPoints = report.trend.map(m => ({ label: m.label, value: m.spend }));
@@ -137,12 +142,20 @@ export default function Reports() {
               ['summary', 'Summary'], ['categoryBreakdown', 'Categories'], ['categoryDetail', 'Category detail'],
               ['categoryTrend', 'Category trend'],
               ['topMerchants', 'Top merchants'], ['trend', 'Trend'], ['transactions', 'Itemized transactions'],
-            ] as Array<[keyof ReportSections, string]>).map(([key, label]) => (
-              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }}>
-                <input type="checkbox" checked={sections[key]} onChange={() => toggleSection(key)} />
-                {label}
-              </label>
-            ))}
+            ] as Array<[keyof ReportSections, string]>).map(([key, label]) => {
+              const needsMultiMonth = (key === 'categoryTrend' || key === 'trend') && !canTrend;
+              return (
+                <label
+                  key={key}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }}
+                  title={needsMultiMonth ? 'Needs a date range spanning more than one month — try Annual, Expense Breakdown with more months, or a wider Custom range.' : undefined}
+                >
+                  <input type="checkbox" checked={sections[key]} onChange={() => toggleSection(key)} />
+                  {label}
+                  {needsMultiMonth && <span style={{ color: 'var(--muted-3)', fontStyle: 'italic' }}>(needs 2+ months)</span>}
+                </label>
+              );
+            })}
           </div>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
@@ -270,30 +283,46 @@ export default function Reports() {
             </ReportSection>
           )}
 
-          {sections.categoryTrend && report.categoryTrend.length > 0 && report.trend.length > 1 && (
+          {sections.categoryTrend && (
             <ReportSection title="Category spend by month">
-              <div className="no-print-inline" style={{ position: 'relative' }}>
-                <div ref={stackRef}>
-                  <StackedBarChart width={640} height={210} labels={report.trend.map(t => t.label)} series={stackSeries} />
+              {!canTrend ? (
+                <EmptyNote>
+                  Needs a date range spanning more than one month — try Annual, Expense Breakdown
+                  with more months, or a wider Custom range.
+                </EmptyNote>
+              ) : report.categoryTrend.length === 0 ? (
+                <EmptyNote>No category spend in this range yet.</EmptyNote>
+              ) : (
+                <div className="no-print-inline" style={{ position: 'relative' }}>
+                  <div ref={stackRef}>
+                    <StackedBarChart width={640} height={210} labels={report.trend.map(t => t.label)} series={stackSeries} />
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 10 }}>
+                    {stackSeries.map(s => (
+                      <span key={s.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--muted)' }}>
+                        <span className="dot" style={{ width: 9, height: 9, background: s.color }} />{s.label}
+                      </span>
+                    ))}
+                  </div>
+                  <ChartExportButtons onExport={f => exportChart('stack', f)} />
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 10 }}>
-                  {stackSeries.map(s => (
-                    <span key={s.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--muted)' }}>
-                      <span className="dot" style={{ width: 9, height: 9, background: s.color }} />{s.label}
-                    </span>
-                  ))}
-                </div>
-                <ChartExportButtons onExport={f => exportChart('stack', f)} />
-              </div>
+              )}
             </ReportSection>
           )}
 
-          {sections.trend && report.trend.length > 1 && (
+          {sections.trend && (
             <ReportSection title="Monthly spend trend">
-              <div className="no-print-inline" style={{ position: 'relative' }}>
-                <div ref={trendRef}><TrendChart width={640} height={180} series={trendPoints} forecastIndex={trendPoints.length} yTicks /></div>
-                <ChartExportButtons onExport={f => exportChart('trend', f)} />
-              </div>
+              {!canTrend ? (
+                <EmptyNote>
+                  Needs a date range spanning more than one month — try Annual, Expense Breakdown
+                  with more months, or a wider Custom range.
+                </EmptyNote>
+              ) : (
+                <div className="no-print-inline" style={{ position: 'relative' }}>
+                  <div ref={trendRef}><TrendChart width={640} height={180} series={trendPoints} forecastIndex={trendPoints.length} yTicks /></div>
+                  <ChartExportButtons onExport={f => exportChart('trend', f)} />
+                </div>
+              )}
             </ReportSection>
           )}
 
@@ -502,6 +531,14 @@ function Th({ align, children }: { align: 'left' | 'right'; children: React.Reac
     <th style={{ textAlign: align, padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>
       {children}
     </th>
+  );
+}
+
+function EmptyNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="no-print" style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>
+      {children}
+    </div>
   );
 }
 
