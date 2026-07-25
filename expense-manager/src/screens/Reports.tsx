@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { Fragment, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   applyTransactionFilter, buildReport, defaultRangeFor, REPORT_TEMPLATES,
@@ -7,7 +7,7 @@ import {
 import { currentYM, shortDate, usd, usd2 } from '../lib/format';
 import { isDesktop } from '../lib/persist';
 import { accountName, categoryName, useStore } from '../store';
-import { PieChartSvg, TrendChart, Toggle, downloadSvgAsImage } from '../components/ui';
+import { BarChartH, PieChartSvg, StackedBarChart, TrendChart, Toggle, downloadSvgAsImage } from '../components/ui';
 
 const CAT_COLORS = ['#1f6f5c', '#4a9d86', '#c8892b', '#86b8a5', '#d9a441', '#7c6f9c', '#b0736a', '#9aa06b', '#5a7f9c', '#cdc7bb'];
 
@@ -18,17 +18,20 @@ export default function Reports() {
   const [customStart, setCustomStart] = useState(`${currentYM()}-01`);
   const [customEnd, setCustomEnd] = useState(currentYM() + '-' + String(new Date(+currentYM().slice(0, 4), +currentYM().slice(5, 7), 0).getDate()));
   const [sections, setSections] = useState<ReportSections>(REPORT_TEMPLATES[0].defaultSections);
+  const [expenseMonths, setExpenseMonths] = useState(6);
   const [pdfStatus, setPdfStatus] = useState<string | null>(null);
 
   const pieRef = useRef<HTMLDivElement>(null);
   const trendRef = useRef<HTMLDivElement>(null);
+  const barsRef = useRef<HTMLDivElement>(null);
+  const stackRef = useRef<HTMLDivElement>(null);
 
   const templateDef = REPORT_TEMPLATES.find(t => t.key === template)!;
 
   const range = useMemo(() => {
     if (template === 'custom') return { start: customStart, end: customEnd, label: `${shortDate(customStart)} – ${shortDate(customEnd)}` };
-    return defaultRangeFor(template, anchorYM);
-  }, [template, anchorYM, customStart, customEnd]);
+    return defaultRangeFor(template, anchorYM, expenseMonths);
+  }, [template, anchorYM, customStart, customEnd, expenseMonths]);
 
   const report: ReportData = useMemo(
     () => buildReport(state, range, templateDef.label),
@@ -55,14 +58,17 @@ export default function Reports() {
     }
   };
 
-  const exportChart = (which: 'pie' | 'trend', format: 'svg' | 'png') => {
-    const container = which === 'pie' ? pieRef.current : trendRef.current;
-    const svg = container?.querySelector('svg');
+  const CHART_REFS = { pie: pieRef, trend: trendRef, bars: barsRef, stack: stackRef };
+  const exportChart = (which: keyof typeof CHART_REFS, format: 'svg' | 'png') => {
+    const svg = CHART_REFS[which].current?.querySelector('svg');
     if (svg) downloadSvgAsImage(svg, `ledger-${which}-${range.start}`, format);
   };
 
-  const donutSlices = report.categories.slice(0, 9).map((c, i) => ({ color: c.category.color || CAT_COLORS[i % CAT_COLORS.length], pct: c.pct, label: c.category.name }));
+  const catColor = (c: { category: { id: string; color: string } }, i: number) => c.category.color || CAT_COLORS[i % CAT_COLORS.length];
+  const donutSlices = report.categories.slice(0, 9).map((c, i) => ({ color: catColor(c, i), pct: c.pct, label: c.category.name }));
   const trendPoints = report.trend.map(m => ({ label: m.label, value: m.spend }));
+  const barItems = report.categoryDetail.slice(0, 10).map((r, i) => ({ label: r.category.name, value: r.amount, color: catColor(r, i) }));
+  const stackSeries = report.categoryTrend.map((s, i) => ({ label: s.category.name, color: catColor(s, i), values: s.values }));
 
   return (
     <div className="page">
@@ -73,7 +79,7 @@ export default function Reports() {
 
       {/* ---- report builder controls ---- */}
       <div className="no-print card" style={{ padding: '18px 20px', marginBottom: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: 10, marginBottom: 16 }}>
           {REPORT_TEMPLATES.map(t => (
             <button key={t.key} onClick={() => selectTemplate(t.key)}
               style={{
@@ -96,6 +102,18 @@ export default function Reports() {
                   <input className="input" type="number" style={{ width: 90 }} value={anchorYM.slice(0, 4)}
                     onChange={e => setAnchorYM(`${e.target.value}-01`)} />
                 </>
+              ) : template === 'expense' ? (
+                <>
+                  <label className="field" style={{ marginBottom: 0 }}>Through</label>
+                  <input className="input" type="month" value={anchorYM} onChange={e => setAnchorYM(e.target.value)} />
+                  <label className="field" style={{ marginBottom: 0, marginLeft: 6 }}>Covering</label>
+                  <select className="input" value={expenseMonths} onChange={e => setExpenseMonths(Number(e.target.value))}>
+                    <option value={1}>1 month</option>
+                    <option value={3}>3 months</option>
+                    <option value={6}>6 months</option>
+                    <option value={12}>12 months</option>
+                  </select>
+                </>
               ) : (
                 <>
                   <label className="field" style={{ marginBottom: 0 }}>Month</label>
@@ -114,7 +132,8 @@ export default function Reports() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             {([
-              ['summary', 'Summary'], ['categoryBreakdown', 'Categories'], ['budgetVsActual', 'Budget vs actual'],
+              ['summary', 'Summary'], ['categoryBreakdown', 'Categories'], ['categoryDetail', 'Category detail'],
+              ['categoryTrend', 'Category trend'], ['budgetVsActual', 'Budget vs actual'],
               ['topMerchants', 'Top merchants'], ['trend', 'Trend'], ['transactions', 'Itemized transactions'],
             ] as Array<[keyof ReportSections, string]>).map(([key, label]) => (
               <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }}>
@@ -173,6 +192,79 @@ export default function Reports() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </ReportSection>
+          )}
+
+          {sections.categoryDetail && report.categoryDetail.length > 0 && (
+            <ReportSection title="Expenses by category">
+              <div className="no-print-inline" style={{ position: 'relative', marginBottom: 16 }}>
+                <div ref={barsRef}><BarChartH width={640} items={barItems} /></div>
+                <ChartExportButtons onExport={f => exportChart('bars', f)} />
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--soft-border)' }}>
+                    <Th align="left">Category</Th>
+                    <Th align="right">Txns</Th>
+                    {report.monthCount > 1 && <Th align="right">Avg / mo</Th>}
+                    <Th align="right">Share</Th>
+                    <Th align="right">Total</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.categoryDetail.map((r, i) => (
+                    <Fragment key={r.category.id}>
+                      <tr style={{ borderBottom: '1px solid var(--row-border)' }}>
+                        <td style={{ padding: '7px 0', color: 'var(--ink-2)', fontWeight: 600 }}>
+                          <span className="dot" style={{ width: 9, height: 9, background: catColor(r, i), marginRight: 8 }} />
+                          {r.category.name}
+                        </td>
+                        <td style={{ padding: '7px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{r.count}</td>
+                        {report.monthCount > 1 && <td style={{ padding: '7px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{usd(r.avgPerMonth)}</td>}
+                        <td style={{ padding: '7px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{Math.round(r.pct * 100)}%</td>
+                        <td style={{ padding: '7px 0 7px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--ink)' }}>{usd(r.amount)}</td>
+                      </tr>
+                      {/* a lone "(no subcategory)" row just restates its parent — only break out real splits */}
+                      {!(r.subs.length === 1 && r.subs[0].direct) && r.subs.map(s => (
+                        <tr key={s.category.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                          <td style={{ padding: '5px 0 5px 22px', color: s.direct ? 'var(--muted-2)' : 'var(--ink-3)', fontStyle: s.direct ? 'italic' : undefined }}>
+                            {s.category.name}
+                          </td>
+                          <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{s.count}</td>
+                          {report.monthCount > 1 && <td />}
+                          <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--muted-3)' }}>{Math.round(s.pct * 100)}%</td>
+                          <td style={{ padding: '5px 0 5px 12px', textAlign: 'right', color: 'var(--ink-3)' }}>{usd(s.amount)}</td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  ))}
+                  <tr>
+                    <td style={{ padding: '9px 0', fontWeight: 600, color: 'var(--ink-2)' }}>Total expenses</td>
+                    <td />
+                    {report.monthCount > 1 && <td />}
+                    <td />
+                    <td style={{ padding: '9px 0 9px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--ink)' }}>{usd(report.expense)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </ReportSection>
+          )}
+
+          {sections.categoryTrend && report.categoryTrend.length > 0 && report.trend.length > 1 && (
+            <ReportSection title="Category spend by month">
+              <div className="no-print-inline" style={{ position: 'relative' }}>
+                <div ref={stackRef}>
+                  <StackedBarChart width={640} height={210} labels={report.trend.map(t => t.label)} series={stackSeries} />
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 10 }}>
+                  {stackSeries.map(s => (
+                    <span key={s.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--muted)' }}>
+                      <span className="dot" style={{ width: 9, height: 9, background: s.color }} />{s.label}
+                    </span>
+                  ))}
+                </div>
+                <ChartExportButtons onExport={f => exportChart('stack', f)} />
               </div>
             </ReportSection>
           )}
@@ -271,6 +363,14 @@ function SummaryTile({ label, value, color }: { label: string; value: string; co
       <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>{label}</div>
       <div style={{ fontSize: 21, fontWeight: 300, color: color ?? 'var(--ink)', marginTop: 4 }}>{value}</div>
     </div>
+  );
+}
+
+function Th({ align, children }: { align: 'left' | 'right'; children: React.ReactNode }) {
+  return (
+    <th style={{ textAlign: align, padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>
+      {children}
+    </th>
   );
 }
 

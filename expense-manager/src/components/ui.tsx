@@ -174,6 +174,101 @@ export function PieChartSvg({ slices, size, id }: {
   );
 }
 
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+
+function compactUsd(n: number): string {
+  if (Math.abs(n) >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+  return `$${Math.round(n)}`;
+}
+
+/**
+ * Ranked horizontal bars — the clearest read on "which categories cost the most".
+ * Real SVG (not divs) so it survives print and the PNG/SVG export path.
+ */
+export function BarChartH({ width, items, labelWidth = 116 }: {
+  width: number;
+  items: Array<{ label: string; value: number; color: string }>;
+  labelWidth?: number;
+}) {
+  const rowH = 24, gap = 6, padT = 6, padB = 6, valueW = 62;
+  const height = padT + padB + items.length * rowH + Math.max(items.length - 1, 0) * gap;
+  const barMax = Math.max(width - labelWidth - valueW - 12, 20);
+  const max = Math.max(...items.map(i => i.value), 1);
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      <rect x="0" y="0" width={width} height={height} fill="#ffffff" />
+      {items.map((it, i) => {
+        const y = padT + i * (rowH + gap);
+        const w = Math.max((it.value / max) * barMax, 2);
+        return (
+          <g key={it.label}>
+            <text x={0} y={y + rowH / 2 + 4} fill="#5c584f" fontSize="11.5">{truncate(it.label, 18)}</text>
+            <rect x={labelWidth} y={y + 3} width={barMax} height={rowH - 6} rx="4" fill="#f4f2ec" />
+            <rect x={labelWidth} y={y + 3} width={w} height={rowH - 6} rx="4" fill={it.color} />
+            <text x={width} y={y + rowH / 2 + 4} fill="#3a3730" fontSize="11.5" fontWeight="600" textAnchor="end">
+              {compactUsd(it.value)}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/**
+ * Monthly stacked bars by category — shows both total spend per month and its category mix.
+ * `series[].values` are index-aligned with `labels`.
+ */
+export function StackedBarChart({ width, height, labels, series }: {
+  width: number; height: number;
+  labels: string[];
+  series: Array<{ label: string; color: string; values: number[] }>;
+}) {
+  const padT = 12, padB = 24, padL = 38, padR = 8;
+  const plotW = width - padL - padR, plotH = height - padT - padB;
+  const totals = labels.map((_, i) => series.reduce((a, s) => a + (s.values[i] ?? 0), 0));
+  const max = Math.max(...totals, 1);
+  const n = Math.max(labels.length, 1);
+  const slot = plotW / n;
+  const barW = Math.min(slot * 0.62, 46);
+  const yAt = (v: number) => padT + plotH - (v / max) * plotH;
+  const gridYs = [0, 0.5, 1].map(f => padT + plotH * f);
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      <rect x="0" y="0" width={width} height={height} fill="#ffffff" />
+      {gridYs.map((y, i) => (
+        <g key={i}>
+          <line x1={padL} y1={y} x2={width - padR} y2={y} stroke="#f0ede6" strokeWidth="1" />
+          <text x={padL - 5} y={y + 3} fill="#c2bdb2" fontSize="9.5" textAnchor="end">
+            {compactUsd(max * (1 - i * 0.5))}
+          </text>
+        </g>
+      ))}
+      {labels.map((label, i) => {
+        const cx = padL + slot * i + slot / 2;
+        let cursor = 0;
+        return (
+          <g key={label + i}>
+            {series.map(s => {
+              const v = s.values[i] ?? 0;
+              if (v <= 0) return null;
+              const h = (v / max) * plotH;
+              const y = yAt(cursor + v);
+              cursor += v;
+              return <rect key={s.label} x={cx - barW / 2} y={y} width={barW} height={Math.max(h, 0.5)} fill={s.color} />;
+            })}
+            <text x={cx} y={height - 8} fill="#a09c92" fontSize="10.5" textAnchor="middle">{label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 /** Serialize an <svg> element and trigger a download as .svg or .png (rasterized via canvas). */
 export function downloadSvgAsImage(svg: SVGSVGElement, filename: string, format: 'svg' | 'png') {
   const clone = svg.cloneNode(true) as SVGSVGElement;
