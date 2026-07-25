@@ -13,11 +13,11 @@ contextBridge.exposeInMainWorld('ledgerApi', {
   savePdfToFolder: (folder, filename) => ipcRenderer.invoke('report:savePdfToFolder', folder, filename),
 
   secretsIsAvailable: () => ipcRenderer.invoke('secrets:isAvailable'),
-  secretsHasApiKey: () => ipcRenderer.invoke('secrets:hasApiKey'),
-  secretsGetApiKeyMasked: () => ipcRenderer.invoke('secrets:getApiKeyMasked'),
-  secretsGetApiKeyForUse: () => ipcRenderer.invoke('secrets:getApiKeyForUse'),
-  secretsSetApiKey: (key) => ipcRenderer.invoke('secrets:setApiKey', key),
-  secretsClearApiKey: () => ipcRenderer.invoke('secrets:clearApiKey'),
+  secretsHasApiKey: (provider) => ipcRenderer.invoke('secrets:hasApiKey', provider),
+  secretsGetApiKeyMasked: (provider) => ipcRenderer.invoke('secrets:getApiKeyMasked', provider),
+  secretsGetApiKeyForUse: (provider) => ipcRenderer.invoke('secrets:getApiKeyForUse', provider),
+  secretsSetApiKey: (provider, key) => ipcRenderer.invoke('secrets:setApiKey', provider, key),
+  secretsClearApiKey: (provider) => ipcRenderer.invoke('secrets:clearApiKey', provider),
 
   securityGetState: () => ipcRenderer.invoke('security:getState'),
   securityUnlock: (passphrase) => ipcRenderer.invoke('security:unlock', passphrase),

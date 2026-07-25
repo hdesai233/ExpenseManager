@@ -107,12 +107,17 @@ export interface Goal {
   monthlyContribution: number;
 }
 
-// Note: the Anthropic API key and database-encryption state are deliberately NOT part of
+/** LLM backend used for the categorization fallback (§4.4 step 3). Keys live in the OS keychain. */
+export type AiProvider = 'anthropic' | 'gemini';
+
+// Note: the LLM API keys and database-encryption state are deliberately NOT part of
 // Settings/AppData — they live outside the normal snapshot pipeline (OS keychain / a dedicated
 // security metadata file) so they can never leak into a JSON backup or full-database export.
+// Which provider is *selected* is not a secret, so it does live here.
 // See src/electron.d.ts (secrets*/security* methods) and Settings.tsx.
 export interface Settings {
   apiFallbackEnabled: boolean;
+  aiProvider: AiProvider;
   householdName: string;
   /** §4.9 scheduled reports: auto-generate a monthly summary PDF on first launch of a new month. */
   autoReportEnabled: boolean;

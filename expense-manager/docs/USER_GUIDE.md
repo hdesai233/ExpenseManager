@@ -62,12 +62,15 @@ show up with a **review badge** on the Transactions nav item.
   rule — the same merchant will auto-categorize correctly on your next
   import.
 - **AI fallback** (optional): in Settings, you can enable AI-assisted
-  categorization and provide your own Anthropic API key. When enabled,
-  merchants that don't match any rule are sent to the API for a
-  suggested category. This is **off by default** — nothing leaves your
-  machine unless you turn it on. The key itself is stored in your OS
+  categorization, choose between **Claude** and **Gemini**, and provide
+  your own API key for whichever you pick. When enabled, merchants that
+  don't match any rule are sent to that provider for a suggested
+  category. This is **off by default** — nothing leaves your machine
+  unless you turn it on, and only merchant names are ever sent (never
+  amounts, dates, or account details). Keys are stored in your OS
   keychain (Windows Credential Manager / macOS Keychain), never in your
-  data file or backups.
+  data file or backups, and each provider keeps its own key so switching
+  back and forth doesn't make you re-enter anything.
 - **Splitting a transaction**: open a transaction and turn on "Split."
   Add rows, each with its own category and amount — the amounts must add
   up to the transaction total before you can save. A split transaction
@@ -145,9 +148,12 @@ For each report you can toggle which sections are included, then:
 
 - **Household name** and **accounts** (add/edit bank & credit card
   accounts — nickname, issuing bank, type, last 4 digits, color).
-- **AI categorization** — enable/disable the API fallback and manage
-  your Anthropic API key (desktop app only; stored in the OS keychain,
-  shown masked once saved).
+- **AI categorization** — enable/disable the API fallback, pick your
+  model provider (Claude or Gemini), and manage that provider's API key
+  (desktop app only; stored in the OS keychain, shown masked once
+  saved). Get a key from `console.anthropic.com` for Claude or
+  `aistudio.google.com/apikey` for Gemini. "Categorize unmatched
+  merchants now" runs a one-off pass against the selected provider.
 - **Database encryption** (desktop app only) — enable a passphrase to
   encrypt your database file whenever the app is closed. When enabled,
   launching the app shows a lock screen asking for your passphrase before
@@ -171,8 +177,8 @@ For each report you can toggle which sections are included, then:
   browser's `localStorage` (browser mode). Nothing syncs to a server.
 - Nothing is sent to any external service unless you explicitly enable
   AI categorization and supply your own API key — and even then, only
-  merchant descriptions for categorization go to the API, not your full
-  transaction history.
+  merchant descriptions go to your chosen provider (Anthropic or
+  Google), never amounts, dates, accounts, or your transaction history.
 - Your database file is **not** tracked by git if you're working from
   source — it lives in your OS app-data folder, well outside the project
   folder.

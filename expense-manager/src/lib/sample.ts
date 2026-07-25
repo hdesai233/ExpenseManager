@@ -168,7 +168,7 @@ export function buildSampleData(): AppData {
     budgets,
     goals,
     settings: {
-      apiFallbackEnabled: false, householdName: 'Rivera Household',
+      apiFallbackEnabled: false, aiProvider: 'anthropic', householdName: 'Rivera Household',
       autoReportEnabled: false, autoReportFolder: '', autoReportLastYM: '',
     },
   };

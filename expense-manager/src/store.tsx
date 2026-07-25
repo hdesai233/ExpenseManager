@@ -155,12 +155,25 @@ function reducer(state: AppData, action: Action): AppData {
     case 'updateSettings':
       return { ...state, settings: { ...state.settings, ...action.patch } };
     case 'restore':
-      return action.data;
+      return withSettingsDefaults(action.data);
     case 'resetAll':
       return buildSampleData();
     default:
       return state;
   }
+}
+
+/**
+ * Every AppData from outside the app — the boot snapshot, a JSON backup, a restored database —
+ * arrives through the `restore` action, so this is the one place to backfill settings added in a
+ * later version. Without it an older snapshot loads with fields missing rather than defaulted.
+ */
+function withSettingsDefaults(data: AppData): AppData {
+  const settings = { ...EMPTY.settings, ...data.settings };
+  if (settings.aiProvider !== 'anthropic' && settings.aiProvider !== 'gemini') {
+    settings.aiProvider = 'anthropic';
+  }
+  return { ...data, settings };
 }
 
 interface StoreCtx {
@@ -176,7 +189,7 @@ const EMPTY: AppData = {
   schemaVersion: 1, accounts: [], transactions: [], categories: [], rules: [],
   batches: [], profiles: [], budgets: [], goals: [],
   settings: {
-    apiFallbackEnabled: false, householdName: '',
+    apiFallbackEnabled: false, aiProvider: 'anthropic', householdName: '',
     autoReportEnabled: false, autoReportFolder: '', autoReportLastYM: '',
   },
 };

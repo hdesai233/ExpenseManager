@@ -29,7 +29,7 @@ function openUnlockedDb() {
   dbLocked = false;
   // One-time migration off the pre-OS-keychain plaintext apiKey settings row, if one exists.
   const legacyKey = store.takeLegacyApiKey();
-  if (legacyKey) secrets.setApiKey(legacyKey);
+  if (legacyKey) secrets.setApiKey('anthropic', legacyKey);
 }
 
 function createWindow() {
@@ -190,14 +190,16 @@ ipcMain.handle('report:savePdfToFolder', async (_e, folder, filename) => {
 // ---- IPC: secrets (API key, OS keychain via safeStorage) ----
 
 ipcMain.handle('secrets:isAvailable', () => secrets.isAvailable());
-ipcMain.handle('secrets:hasApiKey', () => secrets.hasApiKey());
-ipcMain.handle('secrets:getApiKeyMasked', () => {
-  const k = secrets.getApiKey();
-  return k ? `sk-ant-••••••••••••${k.slice(-4)}` : '';
+ipcMain.handle('secrets:hasApiKey', (_e, provider) => secrets.hasApiKey(provider));
+ipcMain.handle('secrets:getApiKeyMasked', (_e, provider) => {
+  const k = secrets.getApiKey(provider);
+  if (!k) return '';
+  // Show enough to tell two keys apart without ever rendering the secret itself.
+  return `${k.slice(0, 6)}••••••••••••${k.slice(-4)}`;
 });
-ipcMain.handle('secrets:getApiKeyForUse', () => secrets.getApiKey());
-ipcMain.handle('secrets:setApiKey', (_e, key) => { secrets.setApiKey(key); return { ok: true }; });
-ipcMain.handle('secrets:clearApiKey', () => { secrets.clearApiKey(); return { ok: true }; });
+ipcMain.handle('secrets:getApiKeyForUse', (_e, provider) => secrets.getApiKey(provider));
+ipcMain.handle('secrets:setApiKey', (_e, provider, key) => { secrets.setApiKey(provider, key); return { ok: true }; });
+ipcMain.handle('secrets:clearApiKey', (_e, provider) => { secrets.clearApiKey(provider); return { ok: true }; });
 
 // ---- IPC: database encryption (passphrase-derived AES-256-GCM, whole-file, at rest between sessions) ----
 

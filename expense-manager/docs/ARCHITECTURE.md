@@ -14,7 +14,7 @@ non-obvious decisions were made.
 | Desktop shell | Electron 43 | contextIsolation + sandboxed preload, no `nodeIntegration` |
 | Database | `node:sqlite` (`DatabaseSync`) | built into Node 24+, **no native compiler required** |
 | Packaging | electron-builder (NSIS) | Windows installer today; the config is cross-platform-ready |
-| AI categorization | Anthropic API via `@anthropic-ai/sdk` | optional, user-supplied key, off by default |
+| AI categorization | Claude (`@anthropic-ai/sdk`) or Gemini (REST) | optional, user-supplied key, off by default |
 
 ### Why `node:sqlite` instead of `better-sqlite3` or Tauri+`rusqlite`
 
@@ -117,15 +117,23 @@ migrations.
 
 ### 5.1 API key storage (OS keychain)
 
-The Anthropic API key (`electron/secrets.cjs`) is stored via Electron's
+LLM API keys (`electron/secrets.cjs`) are stored via Electron's
 `safeStorage` API, which delegates to Windows DPAPI, macOS Keychain, or
-Linux `libsecret` depending on platform. It is written to
-`<userData>/secrets/anthropic-api-key.enc` and is **never** part of
-`AppData`/`Settings` — this was a deliberate type-level decision (see the
-comment in `src/types.ts` above `Settings`) so the key can never leak
-through a JSON backup, a full-database export, or a bug that logs
-`AppData`. `safeStorage` requires the full Electron app context; it does
-not work under `ELECTRON_RUN_AS_NODE`, which is why `secrets.cjs` has to be
+Linux `libsecret` depending on platform. Each provider gets its own file
+(`<userData>/secrets/anthropic-api-key.enc`,
+`<userData>/secrets/gemini-api-key.enc`) so switching providers doesn't
+discard the other's key. The provider id arriving over IPC is resolved
+through a filename allowlist rather than interpolated into a path, so an
+unexpected value can't escape the secrets directory.
+
+Keys are **never** part of `AppData`/`Settings` — a deliberate type-level
+decision (see the comment in `src/types.ts` above `Settings`) so they can
+never leak through a JSON backup, a full-database export, or a bug that
+logs `AppData`. Which provider is *selected* is not a secret, so
+`settings.aiProvider` does live in `AppData`.
+
+`safeStorage` requires the full Electron app context; it does not work
+under `ELECTRON_RUN_AS_NODE`, which is why `secrets.cjs` has to be
 exercised with a real `app.whenReady()` harness in tests, unlike `db.cjs`.
 
 ### 5.2 Database encryption at rest
@@ -175,9 +183,22 @@ UI copy should keep saying so rather than overclaiming.
    transaction, `matchRules` checks the rule set (`exact` / `contains` /
    `regex` merchant patterns) — user-created rules win ties over
    system/seed rules (confidence 0.98 vs 0.95). Unmatched transactions are
-   either left uncategorized or sent to the Anthropic API if
+   either left uncategorized or sent to an LLM if
    `settings.apiFallbackEnabled` is on (opt-in, off by default, per the
    privacy requirement).
+
+   `lib/api.ts` dispatches to one of two interchangeable backends chosen
+   by `settings.aiProvider`: **Claude** through `@anthropic-ai/sdk`, or
+   **Gemini** through a single `fetch` against the REST endpoint (no
+   second SDK — it keeps the bundle smaller and avoids opting into
+   another browser-environment escape hatch; the key travels in the
+   `x-goog-api-key` header, never a URL). Both share the same system
+   prompt, the same taxonomy rendering, and a provider-appropriate JSON
+   schema (Anthropic's `output_config.format`, Gemini's
+   `generationConfig.responseSchema` — an OpenAPI subset using uppercase
+   type names and `nullable` instead of union types). Both funnel through
+   `normalizeResults`, so the rest of the app never learns which provider
+   answered. Only merchant names are sent in either case.
 4. **Learning**: any manual categorization (initial confirm, review-queue
    correction, or accepting an AI suggestion) calls `learnRule`, which
    creates or updates an `exact`-match user rule for that merchant, so the
@@ -278,7 +299,8 @@ renamed to match):
   ledger.sqlite.enc               encrypted DB (present when encryption on + app closed)
   ledger.sqlite-wal / -shm        SQLite WAL side files (transient)
   ledger.security.json            { encrypted: bool, salt } — no key material
-  secrets/anthropic-api-key.enc   safeStorage-encrypted API key
+  secrets/anthropic-api-key.enc   safeStorage-encrypted Claude API key
+  secrets/gemini-api-key.enc      safeStorage-encrypted Gemini API key
 ```
 
 The repo's `.gitignore` blocks `*.sqlite*`, `ledger.security.json`, and

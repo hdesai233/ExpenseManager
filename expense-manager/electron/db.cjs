@@ -209,6 +209,7 @@ function loadSnapshot() {
   const settingsMap = Object.fromEntries(settingsRows.map(r => [r.key, r.value]));
   const settings = {
     apiFallbackEnabled: settingsMap.apiFallbackEnabled === '1',
+    aiProvider: settingsMap.aiProvider === 'gemini' ? 'gemini' : 'anthropic',
     householdName: settingsMap.householdName ?? 'Household',
     autoReportEnabled: settingsMap.autoReportEnabled === '1',
     autoReportFolder: settingsMap.autoReportFolder ?? '',
@@ -264,6 +265,7 @@ function saveSnapshot(data) {
 
     const insSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
     insSetting.run('apiFallbackEnabled', data.settings.apiFallbackEnabled ? '1' : '0');
+    insSetting.run('aiProvider', data.settings.aiProvider === 'gemini' ? 'gemini' : 'anthropic');
     insSetting.run('householdName', data.settings.householdName ?? '');
     insSetting.run('autoReportEnabled', data.settings.autoReportEnabled ? '1' : '0');
     insSetting.run('autoReportFolder', data.settings.autoReportFolder ?? '');

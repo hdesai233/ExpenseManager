@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { categorizeMerchants } from '../lib/api';
+import { AI_PROVIDERS, categorizeMerchants, providerDef } from '../lib/api';
 import { isDesktop } from '../lib/persist';
 import { accountTxnCount, txnCategoryList, useStore } from '../store';
-import type { Account, AccountType, AppData } from '../types';
+import type { Account, AccountType, AiProvider, AppData } from '../types';
 import { Modal, Toggle } from '../components/ui';
 
 export default function Settings() {
@@ -30,8 +30,11 @@ export default function Settings() {
     }
   };
 
+  const provider = state.settings.aiProvider;
+  const providerInfo = providerDef(provider);
+
   const refreshApiKey = () => {
-    if (window.ledgerApi) window.ledgerApi.secretsGetApiKeyMasked().then(setApiKeyMasked);
+    if (window.ledgerApi) window.ledgerApi.secretsGetApiKeyMasked(provider).then(setApiKeyMasked);
   };
   const refreshEncryption = () => {
     if (window.ledgerApi) window.ledgerApi.securityGetState().then(setEncState);
@@ -42,7 +45,7 @@ export default function Settings() {
     refreshApiKey();
     refreshEncryption();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.transactions.length]);
+  }, [state.transactions.length, provider]);
 
   const sizeKB = dbInfo ? Math.round(dbInfo.sizeBytes / 1024) : Math.round(JSON.stringify(state).length / 1024);
 
@@ -103,21 +106,21 @@ export default function Settings() {
 
   const runAiCategorization = async () => {
     if (!window.ledgerApi) return;
-    const apiKey = await window.ledgerApi.secretsGetApiKeyForUse();
-    if (!apiKey) { setAiStatus('No API key set.'); return; }
+    const apiKey = await window.ledgerApi.secretsGetApiKeyForUse(provider);
+    if (!apiKey) { setAiStatus(`No ${providerInfo.label} API key set.`); return; }
     const uncategorized = [...new Set(
       state.transactions
         .filter(t => !t.categoryId && t.flowType !== 'transfer' && !t.reviewed)
         .map(t => t.merchantNormalized),
     )];
     if (uncategorized.length === 0) { setAiStatus('Nothing to categorize — all merchants matched.'); return; }
-    setAiStatus(`Asking Claude about ${uncategorized.length} merchant${uncategorized.length > 1 ? 's' : ''}…`);
+    setAiStatus(`Asking ${providerInfo.label} about ${uncategorized.length} merchant${uncategorized.length > 1 ? 's' : ''}…`);
     try {
-      const results = await categorizeMerchants(apiKey, uncategorized, state.categories);
+      const results = await categorizeMerchants(provider, apiKey, uncategorized, state.categories);
       dispatch({ type: 'applyApiResults', results });
       setAiStatus(`Categorized ${results.filter(r => r.categoryId).length} of ${uncategorized.length} merchants. Low-confidence ones stay in the review queue.`);
     } catch (e) {
-      setAiStatus('API call failed: ' + (e instanceof Error ? e.message : String(e)));
+      setAiStatus(`${providerInfo.label} call failed: ` + (e instanceof Error ? e.message : String(e)));
     }
   };
 
@@ -201,9 +204,28 @@ export default function Settings() {
           <>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0', borderBottom: '1px solid #f2efe8' }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink-3)' }}>Anthropic API key</div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink-3)' }}>Model provider</div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted-2)', maxWidth: 440 }}>
+                  Uses {providerInfo.model}. Each provider keeps its own key, so switching back and forth doesn't lose either one.
+                </div>
+              </div>
+              <div className="seg" style={{ flex: 'none' }}>
+                {AI_PROVIDERS.map(p => (
+                  <button
+                    key={p.key}
+                    className={'seg-item' + (provider === p.key ? ' active' : '')}
+                    onClick={() => dispatch({ type: 'updateSettings', patch: { aiProvider: p.key as AiProvider } })}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0', borderBottom: '1px solid #f2efe8' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink-3)' }}>{providerInfo.label} API key</div>
                 <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>
-                  {apiKeyMasked ? `${apiKeyMasked} · in your OS keychain` : 'Not set'}
+                  {apiKeyMasked ? `${apiKeyMasked} · in your OS keychain` : `Not set — get one at ${providerInfo.keyUrl}`}
                 </div>
               </div>
               <button className="link-sm" style={{ fontSize: 12 }} onClick={() => setKeyModal(true)}>Update</button>
@@ -222,7 +244,7 @@ export default function Settings() {
           </>
         ) : (
           <div style={{ padding: '14px 0', fontSize: 11.5, color: 'var(--muted-2)' }}>
-            API key management requires the desktop app (it's stored in your OS keychain, not available in this browser preview).
+            Model provider and API key management require the desktop app (keys are stored in your OS keychain, not available in this browser preview).
           </div>
         )}
       </div>
@@ -292,7 +314,7 @@ export default function Settings() {
       )}
 
       {keyModal && (
-        <KeyModal onClose={() => setKeyModal(false)} onSaved={() => { setKeyModal(false); refreshApiKey(); }} />
+        <KeyModal provider={provider} onClose={() => setKeyModal(false)} onSaved={() => { setKeyModal(false); refreshApiKey(); }} />
       )}
 
       {encModal && (
@@ -338,35 +360,36 @@ function AccountModal({ account, onClose, onSave }: { account: Account; onClose:
   );
 }
 
-function KeyModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function KeyModal({ provider, onClose, onSaved }: { provider: AiProvider; onClose: () => void; onSaved: () => void }) {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
+  const info = providerDef(provider);
 
   const save = async () => {
     if (!window.ledgerApi) return;
     setBusy(true);
-    await window.ledgerApi.secretsSetApiKey(key.trim());
+    await window.ledgerApi.secretsSetApiKey(provider, key.trim());
     setBusy(false);
     onSaved();
   };
   const clear = async () => {
     if (!window.ledgerApi) return;
     setBusy(true);
-    await window.ledgerApi.secretsClearApiKey();
+    await window.ledgerApi.secretsClearApiKey(provider);
     setBusy(false);
     onSaved();
   };
 
   return (
-    <Modal title="Anthropic API key" onClose={onClose}
+    <Modal title={`${info.label} API key`} onClose={onClose}
       footer={<>
         <button className="btn-ghost" style={{ color: 'var(--red)' }} onClick={clear} disabled={busy}>Clear</button>
         <button className="btn btn-lg" onClick={save} disabled={busy || !key.trim()}>Save</button>
       </>}>
       <label className="field">API key</label>
-      <input className="input" style={{ width: '100%' }} type="password" value={key} onChange={e => setKey(e.target.value)} placeholder="sk-ant-…" autoFocus />
+      <input className="input" style={{ width: '100%' }} type="password" value={key} onChange={e => setKey(e.target.value)} placeholder={info.keyPlaceholder} autoFocus />
       <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 10 }}>
-        Stored in your OS keychain (Windows: DPAPI tied to your login; never written to the database, a JSON backup, or anywhere else in this app) and used directly from this device for merchant-name-only categorization calls.
+        Get a key at {info.keyUrl}. Stored in your OS keychain (Windows: DPAPI tied to your login; never written to the database, a JSON backup, or anywhere else in this app) and used directly from this device for merchant-name-only categorization calls.
       </div>
     </Modal>
   );
