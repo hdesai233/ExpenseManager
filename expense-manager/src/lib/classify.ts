@@ -3,7 +3,11 @@ import type { Account, Transaction } from '../types';
 // ---- Transaction type classification: purchases vs. returns vs. card payments/transfers (§4.2a) ----
 
 const PAYMENT_PATTERNS = [
-  /PAYMENT\s*THANK\s*YOU/i,
+  // Tolerates a dash/other punctuation between "PAYMENT" and "THANK" (not just whitespace) and a
+  // missing "YOU" — some issuers (Chase's CSV export among them) truncate the description field
+  // to a fixed width, cutting "AUTOMATIC PAYMENT - THANK YOU" down to "AUTOMATIC PAYMENT - THANK".
+  /PAYMENT\W*THANK(\s*YOU)?/i,
+  /AUTOMATIC\s*PAYMENT/i,
   /AUTOPAY/i,
   /ONLINE\s*PMT/i,
   /ONLINE\s*PAYMENT/i,
