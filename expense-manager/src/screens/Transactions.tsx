@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { needsReview } from '../lib/categorize';
 import { monthLabel, shortDate, signedUsd2, uid, usd2 } from '../lib/format';
 import { accountName, categoryColor, txnCategoryLabel, useStore } from '../store';
-import type { AppData, Transaction, TransactionSplit } from '../types';
+import type { AppData, Transaction, TransactionSplit, TransferSubtype } from '../types';
 import { ConfidenceBadge, CreditIcon, Modal, TransferIcon } from '../components/ui';
 
 type Tab = 'all' | 'spending' | 'transfers' | 'review';
@@ -243,7 +243,15 @@ function TransactionModal({ txn, onClose }: { txn: Transaction; onClose: () => v
   const { state, dispatch } = useStore();
   const topCats = state.categories.filter(c => !c.parentId);
   const subcatsOf = (parentId: string) => state.categories.filter(c => c.parentId === parentId);
-  const isTransfer = txn.flowType === 'transfer';
+  const originalIsTransfer = txn.flowType === 'transfer';
+
+  // Manual override (§ "denote a transaction as a transfer") — some banks phrase card payments in
+  // ways no regex can anticipate (see classify.ts's PAYMENT_PATTERNS); this is the escape hatch.
+  // Bidirectional: also lets a transaction wrongly auto-classified as a transfer be filed as
+  // regular spending instead.
+  const [markedTransfer, setMarkedTransfer] = useState(originalIsTransfer);
+  const [transferSubtype, setTransferSubtype] = useState<TransferSubtype>(txn.transferSubtype ?? 'internal_transfer');
+  const isTransfer = markedTransfer;
 
   const [splitMode, setSplitMode] = useState(!!(txn.splits && txn.splits.length > 1));
   const [splits, setSplits] = useState<TransactionSplit[]>(
@@ -279,17 +287,37 @@ function TransactionModal({ txn, onClose }: { txn: Transaction; onClose: () => v
   const removeTag = (t: string) => setTags(prev => prev.filter(x => x !== t));
 
   const save = () => {
+    if (markedTransfer) {
+      // Transfers carry no category — clear whatever was there, same invariant import-time
+      // classification already relies on elsewhere (needsReview, txnCategoryLabel, isSpend).
+      dispatch({
+        type: 'updateTxn', txnId: txn.id,
+        patch: {
+          flowType: 'transfer', transferSubtype,
+          categoryId: null, subcategoryId: null, splits: undefined,
+          tags, notes, reviewed: true,
+        },
+      });
+      onClose();
+      return;
+    }
+
+    // Only actually change flowType if the transfer checkbox was toggled off this transaction —
+    // leaves a merchant_credit's flowType untouched when the box was never touched at all.
+    const flowType = originalIsTransfer ? 'expense' : txn.flowType;
+
     if (splitMode) {
       if (!splitsValid) return;
       dispatch({
         type: 'updateTxn', txnId: txn.id,
-        patch: { splits, categoryId: null, subcategoryId: null, tags, notes, confidence: 1, categorizationSource: 'manual', reviewed: true },
+        patch: { flowType, splits, categoryId: null, subcategoryId: null, tags, notes, confidence: 1, categorizationSource: 'manual', reviewed: true },
       });
     } else {
       const sel = resolveCategorySelection(state, singleValue);
       dispatch({
         type: 'updateTxn', txnId: txn.id,
         patch: {
+          flowType,
           splits: undefined,
           categoryId: sel ? sel.categoryId : txn.categoryId,
           subcategoryId: sel ? sel.subcategoryId : txn.subcategoryId,
@@ -327,14 +355,36 @@ function TransactionModal({ txn, onClose }: { txn: Transaction; onClose: () => v
           <button className="btn-ghost" style={{ color: 'var(--red)' }} onClick={del}>Delete transaction</button>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button className="btn btn-lg" disabled={splitMode ? !splitsValid : (!isTransfer && !singleValue)} onClick={save}>Save</button>
+            <button className="btn btn-lg" disabled={!isTransfer && (splitMode ? !splitsValid : !singleValue)} onClick={save}>Save</button>
           </div>
         </>
       }
     >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 14 }}>
         <span style={{ fontSize: 24, fontWeight: 300, color: txn.amount > 0 ? 'var(--green-ok)' : 'var(--ink)' }}>{signedUsd2(txn.amount)}</span>
-        {isTransfer && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Card payments and transfers can't be categorized or split — they're excluded from spend.</span>}
+      </div>
+
+      <div style={{ marginBottom: 20, padding: '11px 13px', background: 'var(--soft)', border: '1px solid var(--soft-border)', borderRadius: 10 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--ink-3)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={markedTransfer} onChange={e => setMarkedTransfer(e.target.checked)} />
+          This is a transfer or card payment — exclude it from spending
+        </label>
+        {markedTransfer ? (
+          <div style={{ display: 'flex', gap: 16, marginTop: 10, paddingLeft: 22 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)', cursor: 'pointer' }}>
+              <input type="radio" name="transferSubtype" checked={transferSubtype === 'credit_card_payment'} onChange={() => setTransferSubtype('credit_card_payment')} />
+              Card payment
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)', cursor: 'pointer' }}>
+              <input type="radio" name="transferSubtype" checked={transferSubtype === 'internal_transfer'} onChange={() => setTransferSubtype('internal_transfer')} />
+              Internal transfer
+            </label>
+          </div>
+        ) : originalIsTransfer && (
+          <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 8, paddingLeft: 22 }}>
+            Choose a category below to file this as regular spending instead.
+          </div>
+        )}
       </div>
 
       {!isTransfer && (

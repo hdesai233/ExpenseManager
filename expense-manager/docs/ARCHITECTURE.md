@@ -233,6 +233,19 @@ UI copy should keep saying so rather than overclaiming.
    don't false-positive here the way they would with a wider window. Both
    rows in a near-duplicate pair are flagged (not just the second), since
    review means comparing the pair, not picking one as "the original."
+
+   **Manual override** (`Transactions.tsx`'s `TransactionModal`): `classifyFlow`'s regexes can't
+   anticipate every bank's phrasing — Chase's CSV export, for instance, truncates its description
+   field to a fixed width, which once cut an autopay's description short enough that no pattern
+   matched it (caught as a real bug; see `PAYMENT_PATTERNS`' comments in `classify.ts`). Rather
+   than only ever fixing detection reactively bank-by-bank, the transaction detail modal has a
+   direct "this is a transfer or card payment" checkbox that sets `flowType`/`transferSubtype` by
+   hand, bypassing `classifyFlow` entirely — and works in reverse too, for something wrongly
+   *auto*-detected as a transfer. It's the same `updateTxn` patch path as editing a category, just
+   overwriting `flowType` instead; going from expense→transfer clears `categoryId`/`subcategoryId`/
+   `splits` (a transfer carries none, per the invariant `needsReview`/`txnCategoryLabel`/`isSpend`
+   already assume), and going the other way requires picking a category before the save button
+   enables, the same validation the normal category picker already has.
 3. **Categorization** (`lib/categorize.ts`): for each remaining
    transaction, `matchRules` checks the rule set (`exact` / `contains` /
    `regex` merchant patterns) — user-created rules win ties over

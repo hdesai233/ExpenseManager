@@ -119,6 +119,13 @@ show up with a **review badge** on the Transactions nav item.
   up to the transaction total before you can save. A split transaction
   shows each category's share in reports and analytics instead of one
   lump category.
+- **Marking a transaction as a transfer**: card payments and account
+  transfers are detected automatically on import, but some banks phrase
+  them in ways detection can miss. Open the transaction and check "This
+  is a transfer or card payment" to exclude it from spending by hand —
+  pick **Card payment** or **Internal transfer** to label it. It works
+  the other way too: uncheck the box on something wrongly detected as a
+  transfer and choose a category to file it as regular spending instead.
 - **Bulk actions**: select multiple transactions with the row checkboxes
   to bulk-categorize, tag, mark reviewed, or delete.
 - Every transaction can also carry free-text **notes** and **tags**.
