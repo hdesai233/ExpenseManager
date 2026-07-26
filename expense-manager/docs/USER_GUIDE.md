@@ -81,6 +81,19 @@ stack of receipts goes in quickly.
 - Manual expenses count toward spending exactly like imported charges,
   and arrive already categorized, so they never land in the review queue.
 
+## 3b. Asking a question about your spending
+
+Click **Ask** in the top bar to ask something in plain English instead of digging through
+Transactions or Analytics — "how much did I spend on coffee last month?", "restaurant charges
+over $50 in the last 90 days", "how many times did I use DoorDash this year?". Ledger turns the
+question into a filter, then runs that filter against your transactions **entirely on this
+device** — your question is sent to your AI provider to interpret, but the matching and the
+results never are.
+
+This reuses the same AI categorization key from Settings (desktop app only), so it needs that
+turned on with a Claude or Gemini key added first. The answer shows a headline number (a total,
+a count, or an average, depending on what you asked) plus the list of transactions behind it.
+
 ## 4. Categorizing transactions
 
 Newly imported transactions that Ledger couldn't confidently categorize
@@ -99,7 +112,8 @@ show up with a **review badge** on the Transactions nav item.
   amounts, dates, or account details). Keys are stored in your OS
   keychain (Windows Credential Manager / macOS Keychain), never in your
   data file or backups, and each provider keeps its own key so switching
-  back and forth doesn't make you re-enter anything.
+  back and forth doesn't make you re-enter anything. The same toggle and
+  key also power **Ask** (§3b) — turning this on enables both.
 - **Splitting a transaction**: open a transaction and turn on "Split."
   Add rows, each with its own category and amount — the amounts must add
   up to the transaction total before you can save. A split transaction
@@ -269,6 +283,11 @@ For each report you can toggle which sections are included, then:
   AI categorization and supply your own API key — and even then, only
   merchant descriptions go to your chosen provider (Anthropic or
   Google), never amounts, dates, accounts, or your transaction history.
+- **Ask** (§3b) uses the same key and toggle. It sends your typed
+  question plus your category and account *names* — never a merchant,
+  amount, date, or any other transaction data. Matching the question
+  against your actual transactions, and the results themselves, never
+  leave your device.
 - Your database file is **not** tracked by git if you're working from
   source — it lives in your OS app-data folder, well outside the project
   folder.

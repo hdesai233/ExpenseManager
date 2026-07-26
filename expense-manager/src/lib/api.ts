@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { AiProvider, Category } from '../types';
+import type { Account, AiProvider, Category } from '../types';
+import { buildAccountContext, buildCategoryContext, DATE_RANGE_TOKENS, type DateRangeToken, type FilterSpec } from './nlquery';
+import { todayISO } from './format';
 
 // ---- LLM categorization fallback (§4.4 step 3) ----
 // Privacy: only merchant names are sent — never amounts, dates, or accounts.
@@ -214,4 +216,169 @@ async function categorizeWithGemini(apiKey: string, merchants: string[], categor
   const text = Array.isArray(parts) ? parts.map((p: { text?: string }) => p.text ?? '').join('') : '';
   if (!text) return [];
   return normalizeResults(text);
+}
+
+// ---- LLM natural-language query -> structured filter spec ----
+// Privacy: only the typed question plus category/account *names* are sent — never a transaction,
+// amount, or date from the user's actual history. `nlquery.ts`'s `applyFilterSpec` runs the
+// resulting spec against real data entirely on-device.
+
+const QUERY_SYSTEM_PROMPT =
+  'You translate a user\'s natural-language question about their own personal spending into a ' +
+  'structured filter. You never see their actual transactions, amounts, or dates — only their ' +
+  'question and the category/account names below. Resolve relative time phrases ("last month", ' +
+  '"this year", "the last 90 days") to one of the fixed date_range tokens; only use "custom" with ' +
+  'explicit ISO (YYYY-MM-DD) dates when the user names a specific range no token can express (e.g. ' +
+  '"between March and May", "since June 1st"). Pick intent "sum" for "how much", "count" for "how ' +
+  'many times", "average" for "average" or "typical", and "list" otherwise (e.g. "show me…"). Use ' +
+  'null for anything the question doesn\'t mention.';
+
+function buildQuerySystemPrompt(today: string): string {
+  return `${QUERY_SYSTEM_PROMPT} Today's date is ${today}.`;
+}
+
+function buildQueryUserPrompt(query: string, categories: Category[], accounts: Account[]): string {
+  return `Categories:\n${buildCategoryContext(categories)}\n\nAccounts:\n${buildAccountContext(accounts)}\n\nQuestion: ${query}`;
+}
+
+interface RawFilterSpec {
+  intent: string;
+  date_range: string;
+  date_from: string | null;
+  date_to: string | null;
+  category_id: string | null;
+  subcategory_id: string | null;
+  merchant_contains: string | null;
+  account_id: string | null;
+  amount_min: number | null;
+  amount_max: number | null;
+}
+
+const FILTER_SPEC_FIELDS = [
+  'intent', 'date_range', 'date_from', 'date_to', 'category_id',
+  'subcategory_id', 'merchant_contains', 'account_id', 'amount_min', 'amount_max',
+];
+const INTENTS: FilterSpec['intent'][] = ['sum', 'count', 'average', 'list'];
+
+/** Parse the model's JSON payload and clamp it into our own shape, same discipline as normalizeResults. */
+function normalizeFilterSpec(text: string): FilterSpec {
+  let parsed: Partial<RawFilterSpec>;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('The model returned a response that was not valid JSON.');
+  }
+  const intent = INTENTS.includes(parsed.intent as FilterSpec['intent']) ? (parsed.intent as FilterSpec['intent']) : 'list';
+  const dateRange = DATE_RANGE_TOKENS.includes(parsed.date_range as DateRangeToken) ? (parsed.date_range as DateRangeToken) : 'all_time';
+  return {
+    intent,
+    dateRange,
+    dateFrom: parsed.date_from || null,
+    dateTo: parsed.date_to || null,
+    categoryId: parsed.category_id || null,
+    subcategoryId: parsed.subcategory_id || null,
+    merchantContains: parsed.merchant_contains || null,
+    accountId: parsed.account_id || null,
+    amountMin: typeof parsed.amount_min === 'number' ? parsed.amount_min : null,
+    amountMax: typeof parsed.amount_max === 'number' ? parsed.amount_max : null,
+  };
+}
+
+/** Dispatch to whichever backend the user selected in Settings. */
+export async function queryToFilterSpec(
+  provider: AiProvider,
+  apiKey: string,
+  query: string,
+  categories: Category[],
+  accounts: Account[],
+  model?: string,
+): Promise<FilterSpec> {
+  const resolved = model?.trim() || providerDef(provider).model;
+  return provider === 'gemini'
+    ? queryWithGemini(apiKey, query, categories, accounts, resolved)
+    : queryWithClaude(apiKey, query, categories, accounts, resolved);
+}
+
+async function queryWithClaude(apiKey: string, query: string, categories: Category[], accounts: Account[], model: string): Promise<FilterSpec> {
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+
+  const schema = {
+    type: 'object' as const,
+    properties: {
+      intent: { type: 'string' as const, enum: INTENTS },
+      date_range: { type: 'string' as const, enum: DATE_RANGE_TOKENS },
+      date_from: { type: ['string', 'null'] as const },
+      date_to: { type: ['string', 'null'] as const },
+      category_id: { type: ['string', 'null'] as const },
+      subcategory_id: { type: ['string', 'null'] as const },
+      merchant_contains: { type: ['string', 'null'] as const },
+      account_id: { type: ['string', 'null'] as const },
+      amount_min: { type: ['number', 'null'] as const },
+      amount_max: { type: ['number', 'null'] as const },
+    },
+    required: FILTER_SPEC_FIELDS,
+    additionalProperties: false,
+  };
+
+  const response = await client.messages.create({
+    model,
+    max_tokens: 1024,
+    system: buildQuerySystemPrompt(todayISO()),
+    output_config: { format: { type: 'json_schema', schema } },
+    messages: [{ role: 'user', content: buildQueryUserPrompt(query, categories, accounts) }],
+  });
+
+  const block = response.content.find(b => b.type === 'text');
+  if (!block || block.type !== 'text') throw new Error('The model returned an empty response.');
+  return normalizeFilterSpec(block.text);
+}
+
+async function queryWithGemini(apiKey: string, query: string, categories: Category[], accounts: Account[], model: string): Promise<FilterSpec> {
+  const responseSchema = {
+    type: 'OBJECT',
+    properties: {
+      intent: { type: 'STRING', enum: INTENTS },
+      date_range: { type: 'STRING', enum: DATE_RANGE_TOKENS },
+      date_from: { type: 'STRING', nullable: true },
+      date_to: { type: 'STRING', nullable: true },
+      category_id: { type: 'STRING', nullable: true },
+      subcategory_id: { type: 'STRING', nullable: true },
+      merchant_contains: { type: 'STRING', nullable: true },
+      account_id: { type: 'STRING', nullable: true },
+      amount_min: { type: 'NUMBER', nullable: true },
+      amount_max: { type: 'NUMBER', nullable: true },
+    },
+    required: FILTER_SPEC_FIELDS,
+  };
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: buildQuerySystemPrompt(todayISO()) }] },
+        contents: [{ role: 'user', parts: [{ text: buildQueryUserPrompt(query, categories, accounts) }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema,
+          maxOutputTokens: 2048,
+        },
+      }),
+    },
+  );
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = body?.error?.message ?? `${response.status} ${response.statusText}`;
+    if (response.status === 404) {
+      throw new Error(`Model "${model}" isn't available to this API key. Set a current model in Settings → Model.`);
+    }
+    throw new Error(message);
+  }
+
+  const parts = body?.candidates?.[0]?.content?.parts;
+  const text = Array.isArray(parts) ? parts.map((p: { text?: string }) => p.text ?? '').join('') : '';
+  if (!text) throw new Error('The model returned an empty response.');
+  return normalizeFilterSpec(text);
 }

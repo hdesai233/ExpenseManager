@@ -13,6 +13,7 @@ import Reports from './screens/Reports';
 import Settings from './screens/Settings';
 import ImportWizard from './screens/ImportWizard';
 import AddExpenseModal from './components/AddExpenseModal';
+import AskModal from './components/AskModal';
 
 interface NavItem { key: ViewKey; label: string; icon: React.ReactNode }
 
@@ -59,6 +60,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
   const [reportBannerDismissed, setReportBannerDismissed] = useState(false);
 
   const reviewCount = state.transactions.filter(needsReview).length;
@@ -93,6 +95,13 @@ export default function App() {
             {search && <button onClick={() => setSearch('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#97938a', fontSize: 13, padding: 0 }}>×</button>}
           </div>
         </div>
+        <button className="btn-ghost" style={{ marginRight: 8 }} title="Ask a question about your spending" onClick={() => setAskOpen(true)}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 5, verticalAlign: '-2px' }}>
+            <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" />
+            <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
+          </svg>
+          Ask
+        </button>
         <button className="btn-ghost" style={{ marginRight: 8 }} onClick={() => setAddExpenseOpen(true)}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ marginRight: 5, verticalAlign: '-2px' }}><path d="M12 5v14M5 12h14" /></svg>
           Add expense
@@ -169,6 +178,7 @@ export default function App() {
 
       {importOpen && <ImportWizard onClose={() => setImportOpen(false)} />}
       {addExpenseOpen && <AddExpenseModal onClose={() => setAddExpenseOpen(false)} />}
+      {askOpen && <AskModal onClose={() => setAskOpen(false)} />}
     </div>
   );
 }

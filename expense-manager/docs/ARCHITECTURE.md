@@ -354,6 +354,45 @@ A past month collapses to a single point (`low === high === projected
 window and sorted soonest-first) powers the Subscriptions screen's
 "due in the next 30 days" list independently of the forecast.
 
+## 6d. Natural-language spending queries
+
+The **Ask** button (top bar → `components/AskModal.tsx`) lets the user type a question like
+"how much did I spend on coffee last month?" instead of building a filter by hand. It's a second,
+narrower use of the same opt-in AI fallback as categorization — same key, same
+`settings.apiFallbackEnabled` gate, same desktop-only restriction (`isDesktop`, since the key
+lives in the OS keychain) — but a different privacy shape worth calling out explicitly:
+
+- **What's sent**: the typed question, plus category and account *names* (`lib/nlquery.ts`'s
+  `buildCategoryContext`/`buildAccountContext` — id/name pairs, an issuing bank, an account type;
+  never a balance, a last-4, or anything from `state.transactions`).
+- **What's returned**: `lib/api.ts`'s `queryToFilterSpec` gets back a `FilterSpec` — a small,
+  schema-pinned JSON object (intent, a `date_range` token, category/account ids, a merchant
+  substring, an amount range). Not a transaction, not an answer — a filter.
+- **What never leaves the device**: `lib/nlquery.ts`'s `applyFilterSpec` runs that `FilterSpec`
+  against `state.transactions` locally. The AI never sees a transaction and never computes the
+  answer; it only decides *which* transactions to look at.
+
+Two deliberate design choices keep this reliable rather than merely plausible-looking:
+
+- **Dates are tokens, not model arithmetic.** The schema's `date_range` is a closed enum
+  (`this_month`, `last_month`, `last_90_days`, …) that `resolveDateRange` turns into concrete ISO
+  bounds using the same `format.ts` helpers `forecastMonthSpend` and the recurring-detection code
+  already rely on. The model only has to *pick* a bucket, never compute "the 1st of two months
+  ago" itself — the one place arbitrary explicit dates are still allowed is `date_range: "custom"`
+  (e.g. "between March and May"), where a literal `YYYY-MM-DD` is far less failure-prone for a
+  model to produce than an offset.
+- **Category matching is split-aware down to the subcategory**, unlike `analytics.ts`'s
+  `categoryContributions` (which only resolves to the top-level category). A query like "how much
+  on coffee" needs the `food` → `coffee` distinction, so `nlquery.ts` carries its own
+  `categoryContribution` that checks `subcategoryId` first and only credits a split transaction
+  for the portion of it actually allocated to the matched category — the same reasoning that
+  keeps `fixedVsVariableSpend` from double-counting a split.
+
+Malformed model output degrades to safe defaults rather than a crash: `normalizeFilterSpec`
+(`lib/api.ts`) clamps an unrecognized `intent` to `"list"` and an unrecognized `date_range` to
+`"all_time"`, so the worst case is an overly broad result set, never a thrown type error deep in
+the executor.
+
 ## 7. Categories, splits, and referential integrity
 
 Category CRUD (`lib/categoryOps.ts`) is written as pure functions so
