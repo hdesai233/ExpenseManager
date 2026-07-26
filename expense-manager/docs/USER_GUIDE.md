@@ -51,7 +51,15 @@ Click **Import** to open the wizard:
      detected automatically and excluded from your spending totals, while
      refunds net against what you spent in that category,
    - applies any matching categorization rules,
-   - flags anything it isn't confident about for your review.
+   - flags anything it isn't confident about for your review,
+   - skips exact repeats of a transaction already in that account (same
+     date, merchant, and amount) and marks them **DUPE**,
+   - flags likely near-duplicates — same merchant and amount within a few
+     days of another charge, either elsewhere in the file or already in
+     that account — as **MAYBE DUP**. Unlike an exact duplicate, these
+     still import normally; it's a nudge to double-check, not an
+     auto-skip, since a same-amount purchase a few days apart is
+     sometimes entirely legitimate.
 
 ## 3a. Adding a cash expense by hand
 
@@ -160,12 +168,23 @@ remembered, so they won't come back the next time detection runs; click
 **"Show not-a-subscription list"** at the bottom of the screen to see
 everything you've dismissed and **Restore** one if you change your mind.
 
+Three stat tiles at the top summarize the current month: how much of your
+spend is **fixed** (going to a recognized recurring merchant) vs.
+**variable** (everything else), and how much is **due in the next 30
+days**. A subscription whose charge amount recently stepped up or down —
+a price increase, most often — shows a badge like "$15.49→$22.99" with
+the date it changed. The **"Upcoming charges"** list below the table is
+the same 30-day window itemized service-by-service, in date order.
+
 ## 8. Analytics & Dashboard
 
 **Dashboard** gives you an at-a-glance monthly view: what you spent and
 across how many charges, how that compares with your recent average, the
-category that moved most, a projection for the month, your category
-breakdown, and what changed versus last month. **Analytics** goes deeper
+category that moved most, a projected month-end **range** (not a single
+number — it separates known recurring bills still due from a statistical
+projection of everything else, so the width of the range reflects real
+uncertainty rather than false precision), your category breakdown, and
+what changed versus last month. **Analytics** goes deeper
 — spend by month, a day-by-day breakdown of one month split by account
 (navigate with the arrows next to the month label; click any bar to see
 that day's transactions — click a specific account's colored segment to

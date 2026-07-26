@@ -79,6 +79,7 @@ export default function ImportWizard({ onClose }: { onClose: () => void }) {
   const valid = preview.filter(r => !r.error && !r.duplicate);
   const dupes = preview.filter(r => r.duplicate).length;
   const errors = preview.filter(r => r.error && r.error !== 'Empty row').length;
+  const possibleDupes = preview.filter(r => r.possibleDuplicate).length;
 
   const commit = () => {
     if (!account || valid.length === 0) return;
@@ -263,6 +264,7 @@ export default function ImportWizard({ onClose }: { onClose: () => void }) {
             <span className="chip" style={{ background: 'var(--green-bg)', color: 'var(--green-conf)', fontWeight: 600 }}>{valid.length} ready to import</span>
             {dupes > 0 && <span className="chip" style={{ background: 'var(--amber-bg)', color: 'var(--amber)', fontWeight: 600 }}>{dupes} duplicates will be skipped</span>}
             {errors > 0 && <span className="chip" style={{ background: 'var(--red-bg)', color: 'var(--red)', fontWeight: 600 }}>{errors} rows couldn't be parsed</span>}
+            {possibleDupes > 0 && <span className="chip" style={{ background: 'var(--blue-bg)', color: 'var(--blue)', fontWeight: 600 }}>{possibleDupes} look like possible duplicates — double-check before importing</span>}
             {pairedCount > 0 && <span className="chip" style={{ background: 'var(--blue-bg)', color: 'var(--blue)', fontWeight: 600 }}>{pairedCount} look like payments/transfers — they'll be excluded from spending</span>}
           </div>
           <div style={{ border: '1px solid var(--card-border)', borderRadius: 10, overflow: 'auto', maxHeight: 320 }}>
@@ -280,6 +282,7 @@ export default function ImportWizard({ onClose }: { onClose: () => void }) {
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--row-border)', width: 70 }}>
                       {r.error ? <span className="tag-badge" style={{ color: 'var(--red)', background: 'var(--red-bg)' }}>ERROR</span>
                         : r.duplicate ? <span className="tag-badge" style={{ color: 'var(--amber)', background: 'var(--amber-bg)' }}>DUPE</span>
+                        : r.possibleDuplicate ? <span className="tag-badge" style={{ color: 'var(--blue)', background: 'var(--blue-bg)' }}>MAYBE DUP</span>
                         : <span className="tag-badge" style={{ color: 'var(--green-conf)', background: 'var(--green-bg)' }}>OK</span>}
                     </td>
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--row-border)', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{r.date ?? '—'}</td>

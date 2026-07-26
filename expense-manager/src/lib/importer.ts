@@ -59,6 +59,14 @@ export interface PreviewRow {
   amount: number | null;
   error: string | null;
   duplicate: boolean;
+  possibleDuplicate: boolean;
+}
+
+/** Day gap between two ISO dates, parsed as local calendar dates (never `new Date(isoString)`). */
+function daysBetween(a: string, b: string): number {
+  const [ay, am, ad] = a.split('-').map(Number);
+  const [by, bm, bd] = b.split('-').map(Number);
+  return Math.abs(new Date(ay, am - 1, ad).getTime() - new Date(by, bm - 1, bd).getTime()) / 86400000;
 }
 
 /** Validate + normalize rows against a mapping. flipSign inverts amounts (for sources where expenses are positive). */
@@ -75,7 +83,7 @@ export function buildPreview(
   );
   const seen = new Set<string>();
 
-  return rows.map((r, index) => {
+  const results = rows.map((r, index) => {
     const rawDate = mapping.date ? r[mapping.date] ?? '' : '';
     const rawDesc = mapping.description ? r[mapping.description] ?? '' : '';
     let amount: number | null = null;
@@ -105,6 +113,31 @@ export function buildPreview(
       duplicate = dupeKeys.has(key) || seen.has(key);
       seen.add(key);
     }
-    return { index, date, merchantRaw: rawDesc.trim(), merchantNormalized, amount, error, duplicate };
+    return { index, date, merchantRaw: rawDesc.trim(), merchantNormalized, amount, error, duplicate, possibleDuplicate: false };
   });
+
+  // Second pass: near-duplicates (same merchant + amount, different date within a few days) —
+  // a softer, non-exclusionary signal distinct from the exact-match `duplicate` flag above, which
+  // already covers same-day repeats. Bucketed by merchant+amount so this stays linear, not O(n^2).
+  const buckets = new Map<string, string[]>();
+  for (const t of existing) {
+    if (t.accountId !== accountId) continue;
+    const key = `${t.merchantNormalized.toUpperCase()}|${t.amount.toFixed(2)}`;
+    const arr = buckets.get(key);
+    if (arr) arr.push(t.date); else buckets.set(key, [t.date]);
+  }
+  for (const r of results) {
+    if (r.error || r.duplicate || r.date === null || r.amount === null) continue;
+    const key = `${r.merchantNormalized.toUpperCase()}|${r.amount.toFixed(2)}`;
+    const arr = buckets.get(key);
+    if (arr) arr.push(r.date); else buckets.set(key, [r.date]);
+  }
+  for (const r of results) {
+    if (r.error || r.duplicate || r.date === null || r.amount === null) continue;
+    const key = `${r.merchantNormalized.toUpperCase()}|${r.amount.toFixed(2)}`;
+    const dates = buckets.get(key) ?? [];
+    r.possibleDuplicate = dates.some(d => d !== r.date && daysBetween(d, r.date as string) <= 3);
+  }
+
+  return results;
 }

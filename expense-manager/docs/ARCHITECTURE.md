@@ -217,6 +217,21 @@ UI copy should keep saying so rather than overclaiming.
    (`findTransferPairs`: a debit on checking/savings + a near-equal credit
    elsewhere within ±3 days). This runs *before* categorization so
    transfers and card payments never show up asking to be categorized.
+
+   **Near-duplicate detection** (`buildPreview` in `lib/importer.ts`) is a
+   separate, softer pass from the exact-match dedupe above. The exact
+   dedupe (`duplicate: boolean`, keyed on `date|merchant|amount`) silently
+   excludes a row from `valid`/import; a near-duplicate
+   (`possibleDuplicate: boolean`) is the same merchant + amount within ±3
+   days of another row — in the new file *or* in the account's existing
+   transactions, so it catches repeats across import batches, not just
+   within one file — but is only a UI warning (`MAYBE DUP` badge, an
+   informational chip), never excluded from import. The ±3-day window is
+   deliberately narrow: subscriptions and other habitual same-amount
+   purchases recur roughly monthly or weekly, well outside 3 days, so they
+   don't false-positive here the way they would with a wider window. Both
+   rows in a near-duplicate pair are flagged (not just the second), since
+   review means comparing the pair, not picking one as "the original."
 3. **Categorization** (`lib/categorize.ts`): for each remaining
    transaction, `matchRules` checks the rule set (`exact` / `contains` /
    `regex` merchant patterns) — user-created rules win ties over
@@ -296,7 +311,48 @@ pattern as `aiModels`: added to `EMPTY`/`sample.ts`, backfilled in
 via a `parseJsonArray()` tolerant parser (the array-shaped sibling of
 `parseJsonObject()`). The Subscriptions screen filters `detectRecurring`'s
 output against this list rather than the detector needing to know
-anything about dismissal itself.
+anything about dismissal itself. Every derived subscription aggregate
+(fixed/variable split, upcoming charges) is built from this
+dismissal-filtered list, not the raw detector output, so dismissing a
+false-positive immediately removes it from those totals too.
+
+`detectRecurring` also flags a **price change**: within a merchant's own
+charge history, it walks back from the most recent amount while
+consecutive charges stay within ~3% of it, then compares that value
+against the median of everything before the step. A move under 5% is
+treated as normal noise and not reported (`priceChange: null`); this is
+gated to non-`variable` merchants only, since a merchant already flagged
+`variable` (utilities, etc.) has no single "price" to step away from.
+
+## 6c. Forecast model: known-fixed + statistically-projected variable
+
+`forecastMonthSpend`'s whole-month, current-month path (the one the
+Dashboard actually uses) does not blend one run-rate over all spending
+the way the category-scoped path still does. It decomposes the month
+into three pieces, computed and summed separately:
+
+1. **Actual so far** (`monthlySpend` through today).
+2. **Known fixed remaining** — recurring charges (`detectRecurring`)
+   whose predicted `nextDate` falls later this month but hasn't happened
+   yet. This is a deterministic lookup, not a projection: a $59.99 Adobe
+   renewal on the 7th either is or isn't still coming.
+3. **Projected variable remaining** — the same run-rate/historical-average
+   blend the old whole-month forecast used, but applied only to the
+   non-recurring (`fixedVsVariableSpend`) portion of spend, both for
+   "so far this month" and for the last 6 months of history.
+
+Splitting fixed from variable this way is strictly more accurate than
+blending a single rate over everything: a subscription renewal doesn't
+"run at a rate," it either fires on a known date or it doesn't, and
+folding it into a whole-month average smears a lumpy, predictable event
+across every remaining day. The result is returned as a `low`–`high` range — a MAD-based spread
+around the median of the last 6 months' variable spend, scaled down as
+the month progresses (less is left to project, so the range narrows).
+A past month collapses to a single point (`low === high === projected
+=== sofar`), since there's nothing left to project. `upcomingCharges`
+(a thin wrapper over the same `nextDate` predictions, filtered to a
+window and sorted soonest-first) powers the Subscriptions screen's
+"due in the next 30 days" list independently of the forecast.
 
 ## 7. Categories, splits, and referential integrity
 

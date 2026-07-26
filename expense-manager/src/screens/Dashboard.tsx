@@ -28,7 +28,7 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
   };
 
   const spent = monthlySpend(txns, ym);
-  const { projected, confident } = forecastMonthSpend(txns, ym);
+  const { projected, confident, low, high, knownFixedRemaining } = forecastMonthSpend(txns, ym);
 
   const series = monthlySeries(txns, 6, ym);
   const stats = spendStats(series.slice(0, -1)); // prior months only — the current one is partial
@@ -122,12 +122,15 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
         {isCurrentMonth ? (
           <div style={{ background: '#fdf7ee', border: '1px solid #ecdcbf', borderRadius: 14, padding: '16px 17px' }}>
             <div className="kicker" style={{ color: 'var(--amber-text)' }}>Projected month-end</div>
-            <div className="big-num" style={{ margin: '9px 0 3px', color: 'var(--amber-deep)' }}>~{usd(projected)}</div>
+            <div className="big-num" style={{ margin: '9px 0 3px', color: 'var(--amber-deep)', fontSize: Math.round(low) === Math.round(high) ? undefined : 26 }}>
+              {Math.round(low) === Math.round(high) ? `~${usd(projected)}` : `${usd(low)}–${usd(high)}`}
+            </div>
             <div style={{ fontSize: 12, color: 'var(--amber-text)' }}>
               {!confident ? 'Low confidence — under 3 months of history'
                 : stats.average === 0 ? 'At the current pace'
                 : vsAverage > 0 ? `⚠ Tracking ${usd(vsAverage)} above typical`
                 : `Tracking ${usd(Math.abs(vsAverage))} below typical`}
+              {knownFixedRemaining > 0.5 && ` · ${usd(knownFixedRemaining)} in known bills still due`}
             </div>
           </div>
         ) : (

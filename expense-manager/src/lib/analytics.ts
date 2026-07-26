@@ -1,5 +1,5 @@
 import type { Account, Category, Transaction } from '../types';
-import { addMonths, currentYM, daysInMonth, todayISO, toYM } from './format';
+import { addDaysISO, addMonths, currentYM, daysInMonth, todayISO, toYM } from './format';
 
 // ---- Aggregations, forecasting, recurring detection (§4.5, §4.8) ----
 // Ledger tracks spending only: there is no income, savings, or budget math here.
@@ -202,9 +202,32 @@ export function categorySpend(txns: Transaction[], categoryId: string, ym: strin
   );
 }
 
-// ---- Forecasting: blend of run-rate and historical average (§4.8) ----
+// ---- Fixed vs. variable spend (§4.8: which spend is committed vs. discretionary) ----
 
-export interface Forecast { projected: number; confident: boolean }
+export interface FixedVariableSplit { fixed: number; variable: number; total: number; fixedPct: number }
+
+/**
+ * Splits a month's spend into "fixed" (charged by a merchant `detectRecurring` recognizes as a
+ * recurring commitment) vs. "variable" (everything else). Pass `recurringMerchants` when the
+ * caller already has a `detectRecurring` result (e.g. looping over several months) to avoid
+ * recomputing it; otherwise it's derived fresh from `txns`.
+ */
+export function fixedVsVariableSpend(txns: Transaction[], ym: string, recurringMerchants?: Set<string>): FixedVariableSplit {
+  const fixedMerchants = recurringMerchants ?? new Set(detectRecurring(txns).map(r => r.merchant));
+  let fixed = 0;
+  let variable = 0;
+  for (const t of txnsInMonth(txns, ym)) {
+    const amt = spendOf(t);
+    if (fixedMerchants.has(t.merchantNormalized)) fixed += amt;
+    else variable += amt;
+  }
+  const total = fixed + variable;
+  return { fixed, variable, total, fixedPct: total > 0.005 ? fixed / total : 0 };
+}
+
+// ---- Forecasting: known fixed remainder + statistical projection of variable spend (§4.8) ----
+
+export interface Forecast { projected: number; confident: boolean; low: number; high: number; knownFixedRemaining: number }
 
 export function forecastMonthSpend(txns: Transaction[], ym: string, categoryId?: string): Forecast {
   const today = todayISO();
@@ -213,25 +236,62 @@ export function forecastMonthSpend(txns: Transaction[], ym: string, categoryId?:
   const dayOfMonth = isCurrent ? Number(today.slice(8, 10)) : dim;
 
   const sofar = categoryId ? categorySpend(txns, categoryId, ym) : monthlySpend(txns, ym);
-  if (!isCurrent) return { projected: sofar, confident: true };
+  if (!isCurrent) return { projected: sofar, confident: true, low: sofar, high: sofar, knownFixedRemaining: 0 };
 
-  // Historical monthly totals (last 6 complete months)
-  const hist: number[] = [];
-  for (let i = 1; i <= 6; i++) {
-    const m = addMonths(ym, -i);
-    const v = categoryId ? categorySpend(txns, categoryId, m) : monthlySpend(txns, m);
-    if (v > 0) hist.push(v);
-  }
-  const histAvg = hist.length ? hist.reduce((a, b) => a + b, 0) / hist.length : 0;
   const elapsed = Math.min(Math.max(dayOfMonth / dim, 0.03), 1);
-  const runRate = sofar / elapsed;
 
-  // Weight run-rate more as the month progresses
-  const projected = hist.length
+  if (categoryId) {
+    // Category-scoped forecasts don't separate fixed/variable — keep the original blended run-rate model.
+    const hist: number[] = [];
+    for (let i = 1; i <= 6; i++) {
+      const v = categorySpend(txns, categoryId, addMonths(ym, -i));
+      if (v > 0) hist.push(v);
+    }
+    const histAvg = hist.length ? hist.reduce((a, b) => a + b, 0) / hist.length : 0;
+    const runRate = sofar / elapsed;
+    const projected = hist.length
+      ? runRate * elapsed + histAvg * (1 - elapsed) * 0.9 + (runRate - histAvg) * elapsed * 0.1
+      : runRate;
+    const clamped = Math.max(projected, sofar);
+    const band = clamped * 0.175;
+    return { projected: clamped, confident: hist.length >= 3, low: Math.max(sofar, clamped - band), high: clamped + band, knownFixedRemaining: 0 };
+  }
+
+  // Whole-month forecast: known fixed charges still due this month, plus a statistical
+  // projection of variable (discretionary) spend, instead of blending one rate over everything.
+  const recurring = detectRecurring(txns);
+  const fixedMerchants = new Set(recurring.map(r => r.merchant));
+  const endOfMonth = `${ym}-${String(dim).padStart(2, '0')}`;
+  const knownFixedRemaining = recurring.reduce((a, r) => a + (r.nextDate > today && r.nextDate <= endOfMonth ? r.avgAmount : 0), 0);
+
+  const variableSoFar = fixedVsVariableSpend(txns, ym, fixedMerchants).variable;
+  const runRate = variableSoFar / elapsed;
+
+  const histVariable: number[] = [];
+  for (let i = 1; i <= 6; i++) {
+    const v = fixedVsVariableSpend(txns, addMonths(ym, -i), fixedMerchants).variable;
+    if (v > 0.005) histVariable.push(v);
+  }
+  const histAvg = histVariable.length ? histVariable.reduce((a, b) => a + b, 0) / histVariable.length : 0;
+  const variableProjectedFull = histVariable.length
     ? runRate * elapsed + histAvg * (1 - elapsed) * 0.9 + (runRate - histAvg) * elapsed * 0.1
     : runRate;
+  const variableRemaining = Math.max(variableProjectedFull - variableSoFar, 0);
 
-  return { projected: Math.max(projected, sofar), confident: hist.length >= 3 };
+  const base = sofar + knownFixedRemaining;
+  const projected = base + variableRemaining;
+  const confident = histVariable.length >= 3;
+  const spread = confident
+    ? median(histVariable.map(v => Math.abs(v - median(histVariable)))) * (1 - elapsed)
+    : variableRemaining * 0.3;
+
+  return {
+    projected,
+    confident,
+    low: Math.max(base, projected - spread),
+    high: projected + spread,
+    knownFixedRemaining,
+  };
 }
 
 export interface MonthPoint { ym: string; spend: number }
@@ -325,6 +385,8 @@ export function merchantTrends(txns: Transaction[], ym: string, windowMonths = 3
 
 // ---- Recurring / subscription detection (§4.8: merchant + amount + interval clustering) ----
 
+export interface PriceChange { fromAmount: number; toAmount: number; changedAt: string }
+
 export interface RecurringCharge {
   merchant: string;
   categoryId: string | null;
@@ -336,6 +398,28 @@ export interface RecurringCharge {
   nextDate: string;
   monthlyCost: number;
   unused: boolean;   // no charge in >60 days beyond cadence — possible forgotten sub
+  priceChange: PriceChange | null;  // most recent step up/down in a non-variable merchant's charge amount
+}
+
+/**
+ * Detects a step change in a stable (non-variable) merchant's charge amount — e.g. a subscription
+ * price increase. Walks back from the most recent charge while it matches, then compares the most
+ * recent value against the median of everything before the step; a <5% move isn't reported as a
+ * "price change" since that's within normal noise for this merchant.
+ */
+function detectPriceChange(sorted: Transaction[]): PriceChange | null {
+  if (sorted.length < 4) return null;
+  const amounts = sorted.map(t => -t.amount);
+  const last = amounts[amounts.length - 1];
+  let i = amounts.length - 1;
+  while (i > 0 && Math.abs(amounts[i - 1] - last) <= Math.max(0.5, last * 0.03)) i--;
+  if (i === 0) return null;
+  const priorAmounts = amounts.slice(0, i);
+  const priorMedian = median(priorAmounts);
+  if (priorMedian <= 0.005) return null;
+  const diffPct = (last - priorMedian) / priorMedian;
+  if (Math.abs(diffPct) < 0.05) return null;
+  return { fromAmount: priorMedian, toAmount: last, changedAt: sorted[i].date };
 }
 
 export function detectRecurring(txns: Transaction[]): RecurringCharge[] {
@@ -399,9 +483,28 @@ export function detectRecurring(txns: Transaction[]): RecurringCharge[] {
       nextDate: `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`,
       monthlyCost,
       unused: (today - lastT) / 86400000 > cadDays + 60,
+      priceChange: variable ? null : detectPriceChange(sorted),
     });
   }
   return out.sort((a, b) => b.monthlyCost - a.monthlyCost);
+}
+
+export interface UpcomingCharge {
+  merchant: string;
+  categoryId: string | null;
+  subcategoryId: string | null;
+  amount: number;
+  date: string;
+  cadence: RecurringCharge['cadence'];
+}
+
+/** Recurring charges predicted to land within `withinDays` of today, soonest first. */
+export function upcomingCharges(recurring: RecurringCharge[], withinDays = 30): UpcomingCharge[] {
+  const cutoff = addDaysISO(todayISO(), withinDays);
+  return recurring
+    .filter(r => r.nextDate <= cutoff)
+    .map(r => ({ merchant: r.merchant, categoryId: r.categoryId, subcategoryId: r.subcategoryId, amount: r.avgAmount, date: r.nextDate, cadence: r.cadence }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function median(arr: number[]): number {
