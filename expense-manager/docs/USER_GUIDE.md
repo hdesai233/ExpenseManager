@@ -215,7 +215,10 @@ category that moved most, a projected month-end **range** (not a single
 number — it separates known recurring bills still due from a statistical
 projection of everything else, so the width of the range reflects real
 uncertainty rather than false precision), your category breakdown, and
-what changed versus last month. **Analytics** goes deeper
+what changed versus last month. The transactions list at the bottom
+toggles between **Recent** (most recent first) and **Largest** (biggest
+expenses first, transfers and card payments excluded) for whichever
+month you're viewing. **Analytics** goes deeper
 — spend by month, a day-by-day breakdown of one month split by account
 (navigate with the arrows next to the month label; click any bar to see
 that day's transactions — click a specific account's colored segment to

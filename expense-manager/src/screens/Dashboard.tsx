@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { categoryMovers, forecastMonthSpend, isSpend, monthlySeries, monthlySpend, spendByCategory, spendStats } from '../lib/analytics';
+import { categoryMovers, forecastMonthSpend, isSpend, monthlySeries, monthlySpend, spendByCategory, spendOf, spendStats } from '../lib/analytics';
 import { needsReview } from '../lib/categorize';
 import { addMonths, currentYM, daysInMonth, monthShort, monthYearFull, shortDate, signedUsd2, usd } from '../lib/format';
 import { accountName, categoryColor, txnCategoryLabel, useStore } from '../store';
@@ -40,7 +40,11 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
 
   const cats = spendByCategory(txns, state.categories, ym);
   const review = txns.filter(needsReview).sort((a, b) => b.date.localeCompare(a.date));
-  const recent = [...txns].filter(t => t.date.slice(0, 7) === ym).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0, 6);
+  const monthTxns = txns.filter(t => t.date.slice(0, 7) === ym);
+  const recent = [...monthTxns].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0, 6);
+  const largest = monthTxns.filter(t => spendOf(t) > 0.005).sort((a, b) => spendOf(b) - spendOf(a)).slice(0, 6);
+  const [txnView, setTxnView] = useState<'recent' | 'largest'>('recent');
+  const shownTxns = txnView === 'largest' ? largest : recent;
 
   const trendPoints = isCurrentMonth
     ? [...series.map(m => ({ label: monthShort(m.ym), value: m.spend })), { label: 'proj', value: projected }]
@@ -282,15 +286,27 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
         </div>
       </div>
 
-      {/* recent transactions */}
+      {/* recent / largest transactions */}
       <div className="card" style={{ marginTop: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div className="card-title">{isCurrentMonth ? 'Recent transactions' : `Transactions in ${monthYearFull(ym)}`}</div>
-          <button className="link-sm" onClick={() => go('transactions')}>See all</button>
+          <div className="card-title">
+            {txnView === 'largest' ? 'Largest expenses' : isCurrentMonth ? 'Recent transactions' : `Transactions in ${monthYearFull(ym)}`}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="seg">
+              <button className={'seg-item' + (txnView === 'recent' ? ' active' : '')} onClick={() => setTxnView('recent')}>Recent</button>
+              <button className={'seg-item' + (txnView === 'largest' ? ' active' : '')} onClick={() => setTxnView('largest')}>Largest</button>
+            </div>
+            <button className="link-sm" onClick={() => go('transactions')}>See all</button>
+          </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {recent.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>No transactions this month.</div>}
-          {recent.map(t => (
+          {shownTxns.length === 0 && (
+            <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>
+              {txnView === 'largest' ? 'No expenses this month.' : 'No transactions this month.'}
+            </div>
+          )}
+          {shownTxns.map(t => (
             <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 2px', borderTop: '1px solid #f2efe8' }}>
               <span className="dot" style={{ width: 9, height: 9, background: t.flowType === 'transfer' ? '#b6b2a8' : categoryColor(state, t.categoryId) }} />
               <div style={{ width: 52, fontSize: 11.5, color: 'var(--muted-2)', flex: 'none' }}>{shortDate(t.date)}</div>
