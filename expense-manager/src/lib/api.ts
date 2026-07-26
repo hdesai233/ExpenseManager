@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Account, AiProvider, Category } from '../types';
 import { buildAccountContext, buildCategoryContext, DATE_RANGE_TOKENS, type DateRangeToken, type FilterSpec } from './nlquery';
+import type { SavingsInsight } from './insights';
 import { todayISO } from './format';
 
 // ---- LLM categorization fallback (§4.4 step 3) ----
@@ -381,4 +382,117 @@ async function queryWithGemini(apiKey: string, query: string, categories: Catego
   const text = Array.isArray(parts) ? parts.map((p: { text?: string }) => p.text ?? '').join('') : '';
   if (!text) throw new Error('The model returned an empty response.');
   return normalizeFilterSpec(text);
+}
+
+// ---- LLM savings coaching — optional layer over lib/insights.ts's rule-based detectors ----
+// Privacy: only the already-computed insight titles/numbers are sent (see buildAdviceUserPrompt) —
+// never a raw transaction, date, or account. The detection itself (lib/insights.ts) needs no AI
+// and runs the same with or without this; this only turns the numbers into written suggestions.
+
+const ADVICE_SYSTEM_PROMPT =
+  'You are a personal finance coach. You will be given a list of spending insights that have ' +
+  'already been computed correctly from the user\'s data — treat every number in them as ground ' +
+  'truth; never invent, recompute, or alter a dollar figure. Write 3 to 6 short, specific, ' +
+  'actionable suggestions for reducing expenses, in plain conversational language, each grounded ' +
+  'in one or more of the given insights. Do not suggest anything not supported by them. Prioritize ' +
+  'the insights with the largest potential savings, but you may combine related ones into one ' +
+  'suggestion.';
+
+function buildAdviceUserPrompt(insights: SavingsInsight[]): string {
+  const lines = insights.map(i =>
+    `- ${i.title} — ${i.detail} (potential ${i.recurring ? 'monthly' : 'one-time'} savings: ~$${Math.round(i.potentialSavings)})`,
+  );
+  return `Insights:\n${lines.join('\n')}`;
+}
+
+interface RawAdvice { suggestions?: string[] }
+
+function normalizeAdvice(text: string): string[] {
+  let parsed: RawAdvice;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('The model returned a response that was not valid JSON.');
+  }
+  if (!Array.isArray(parsed.suggestions)) return [];
+  return parsed.suggestions.map(s => String(s)).filter(s => s.trim().length > 0);
+}
+
+/** Dispatch to whichever backend the user selected in Settings. */
+export async function generateSavingsAdvice(
+  provider: AiProvider,
+  apiKey: string,
+  insights: SavingsInsight[],
+  model?: string,
+): Promise<string[]> {
+  const resolved = model?.trim() || providerDef(provider).model;
+  return provider === 'gemini'
+    ? adviceWithGemini(apiKey, insights, resolved)
+    : adviceWithClaude(apiKey, insights, resolved);
+}
+
+async function adviceWithClaude(apiKey: string, insights: SavingsInsight[], model: string): Promise<string[]> {
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+
+  const schema = {
+    type: 'object' as const,
+    properties: {
+      suggestions: { type: 'array' as const, items: { type: 'string' as const } },
+    },
+    required: ['suggestions'],
+    additionalProperties: false,
+  };
+
+  const response = await client.messages.create({
+    model,
+    max_tokens: 1024,
+    system: ADVICE_SYSTEM_PROMPT,
+    output_config: { format: { type: 'json_schema', schema } },
+    messages: [{ role: 'user', content: buildAdviceUserPrompt(insights) }],
+  });
+
+  const block = response.content.find(b => b.type === 'text');
+  if (!block || block.type !== 'text') throw new Error('The model returned an empty response.');
+  return normalizeAdvice(block.text);
+}
+
+async function adviceWithGemini(apiKey: string, insights: SavingsInsight[], model: string): Promise<string[]> {
+  const responseSchema = {
+    type: 'OBJECT',
+    properties: {
+      suggestions: { type: 'ARRAY', items: { type: 'STRING' } },
+    },
+    required: ['suggestions'],
+  };
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: ADVICE_SYSTEM_PROMPT }] },
+        contents: [{ role: 'user', parts: [{ text: buildAdviceUserPrompt(insights) }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema,
+          maxOutputTokens: 2048,
+        },
+      }),
+    },
+  );
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = body?.error?.message ?? `${response.status} ${response.statusText}`;
+    if (response.status === 404) {
+      throw new Error(`Model "${model}" isn't available to this API key. Set a current model in Settings → Model.`);
+    }
+    throw new Error(message);
+  }
+
+  const parts = body?.candidates?.[0]?.content?.parts;
+  const text = Array.isArray(parts) ? parts.map((p: { text?: string }) => p.text ?? '').join('') : '';
+  if (!text) throw new Error('The model returned an empty response.');
+  return normalizeAdvice(text);
 }

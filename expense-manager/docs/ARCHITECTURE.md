@@ -480,6 +480,45 @@ delta in the same direction. The two numbers can point opposite ways on the same
 Housing in the sample data: dollars flat-to-down, share up, because everything else fell more)
 and that disagreement is itself the useful signal, not a contradiction to resolve.
 
+## 6g. Savings insights and optional AI coaching
+
+The **Savings** screen (`screens/Savings.tsx` + `lib/insights.ts`) answers "where should I cut
+back?" by re-ranking detectors the rest of the app already computes — it adds no new
+pattern-detection logic of its own. `generateInsights(txns, categories, ym)` collects from:
+`categorySpend`/`monthlySpend` (category share-of-wallet drift), `detectRecurring` (subscription
+price increases, unused subscriptions), `categoryAnomalies` (a category running well above its
+own 6-month history), `unusualCharges` (one specific charge well above what that merchant usually
+costs), `spendDistribution` (a batch of unusually large purchases in one category this month), and
+`merchantTrends` (an established habit that intensified). Each becomes a `SavingsInsight` with a
+computed dollar estimate, sorted by that estimate descending. **This entire feature works with zero
+AI configured** — it's a deterministic pass over data already on the device, same as every other
+analytic in the app.
+
+One detector is deliberately **not** reused as-is: category share drift is computed directly from
+`categorySpend`/`monthlySpend` rather than by filtering `categoryMovers`' output, because
+`categoryMovers` itself filters out any category whose *dollar* delta is near zero before an insight
+ever sees it — which would silently hide exactly the case this insight exists to catch: a category
+whose own spend held flat while its *share* climbed because everything else fell faster. That's
+still "this category now dominates more of your spending," so it needs its own unfiltered pass.
+
+Each `SavingsInsight` carries a `recurring: boolean` — `true` for subscription price
+increases/unused subscriptions/category drift (an ongoing monthly cost if left unaddressed),
+`false` for the rest (a specific historical charge, a batch of large purchases this month, a
+3-month frequency comparison — real money, but not an ongoing monthly rate). The screen sums these
+into two separate headline totals rather than one blended number, since adding a monthly-recurring
+dollar figure to a one-time historical one would produce a number with no real-world meaning.
+
+**"Get AI coaching"** is the one part of this screen that ever sends anything anywhere, and only
+when the user has already turned AI on elsewhere (same `settings.apiFallbackEnabled` gate,
+`isDesktop` restriction, and provider/key as categorization and Ask). `lib/api.ts`'s
+`generateSavingsAdvice` sends only the already-computed insight titles, detail strings, and dollar
+estimates — never a transaction, date, account, or anything not already summarized into an
+insight — and asks the model to turn them into 3–6 short written suggestions, schema-pinned to
+`{ suggestions: string[] }` the same way `queryToFilterSpec` is pinned to a `FilterSpec`. The
+system prompt explicitly tells the model to treat every number as ground truth and never invent or
+recompute one, so the coaching layer can misjudge *phrasing* but can't misstate a fact the local
+detectors already got right.
+
 ## 7. Categories, splits, and referential integrity
 
 Category CRUD (`lib/categoryOps.ts`) is written as pure functions so

@@ -28,7 +28,7 @@ importing your own data.
 - **Sidebar**: three sections —
   - *Overview*: Dashboard, Transactions (badge = items awaiting review),
     Analytics
-  - *Insights*: Trends, Subscriptions
+  - *Insights*: Trends, Subscriptions, Savings
   - *Manage*: Categories & Rules, Reports & Export, Settings
   - Below that, your linked accounts and household name.
 
@@ -207,6 +207,29 @@ a price increase, most often — shows a badge like "$15.49→$22.99" with
 the date it changed. The **"Upcoming charges"** list below the table is
 the same 30-day window itemized service-by-service, in date order.
 
+## 7a. Savings
+
+Ledger looks across your spending for concrete places to cut back and ranks them by estimated
+dollar impact — a category taking a bigger bite of your budget, a subscription that got more
+expensive, one you haven't touched in months, a category or a specific charge running well above
+what's normal for it, or a merchant you've started visiting noticeably more often. **This runs
+entirely on this device and needs no AI** — every card is built from the same analysis already
+used on the Trends, Subscriptions, and Analytics screens, just collected into one ranked list with
+a dollar figure attached.
+
+Each card is labeled **per month** (an ongoing cost — a subscription price hike, a category
+permanently taking a bigger share of your spend — that keeps costing you until you address it) or
+**one-time** (a specific overspend already in the past — an unusual charge, an unusually large
+batch of purchases, a burst of extra visits to somewhere). The two headline totals at the top are
+kept separate for the same reason: adding a monthly figure to a one-time one wouldn't mean
+anything real.
+
+**Get AI coaching**, at the bottom, is optional and off unless you've already turned on AI
+categorization in Settings (same key, same desktop-only requirement). When you click it, the
+insight titles and numbers already shown on the screen — never a transaction, date, or account —
+are sent to your chosen provider, which writes back 3–6 short, specific suggestions grounded in
+those numbers.
+
 ## 8. Analytics & Dashboard
 
 **Dashboard** gives you an at-a-glance monthly view: what you spent and
@@ -336,6 +359,11 @@ For each report you can toggle which sections are included, then:
   amount, date, or any other transaction data. Matching the question
   against your actual transactions, and the results themselves, never
   leave your device.
+- **Savings**' "Get AI coaching" (§7a) also uses the same key and toggle,
+  and only runs when you click it. It sends the already-computed insight
+  titles and dollar figures shown on the screen — never a transaction,
+  date, or account. All of the insights themselves are computed on-device
+  regardless of whether AI is enabled at all.
 - Your database file is **not** tracked by git if you're working from
   source — it lives in your OS app-data folder, well outside the project
   folder.

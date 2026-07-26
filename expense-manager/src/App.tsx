@@ -8,6 +8,7 @@ import Transactions from './screens/Transactions';
 import Analytics from './screens/Analytics';
 import Trends from './screens/Trends';
 import Subscriptions from './screens/Subscriptions';
+import Savings from './screens/Savings';
 import Categories from './screens/Categories';
 import Reports from './screens/Reports';
 import Settings from './screens/Settings';
@@ -23,6 +24,7 @@ const ICONS = {
   analytics: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19V5" /><path d="M4 19h16" /><path d="M7 15l4-5 3 3 4-6" /></svg>,
   trends: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l5-5 4 3 8-8" /><path d="M15 7h5v5" /></svg>,
   subscriptions: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M20 8a8 8 0 0 0-14.5-3M4 4v4h4" /><path d="M4 16a8 8 0 0 0 14.5 3M20 20v-4h-4" /></svg>,
+  savings: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v10" /><path d="M15 9.5c0-1.4-1.3-2.5-3-2.5s-3 1-3 2.3c0 3 6 1.4 6 4.4 0 1.3-1.3 2.3-3 2.3s-3-1.1-3-2.5" /></svg>,
   categories: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"><path d="M4 4h7l9 9-7 7-9-9z" /><circle cx="8.5" cy="8.5" r="1.4" fill="currentColor" stroke="none" /></svg>,
   reports: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 16h6M9 10h2" /></svg>,
   settings: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="3.2" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg>,
@@ -42,6 +44,7 @@ const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
     items: [
       { key: 'trends', label: 'Trends', icon: ICONS.trends },
       { key: 'subscriptions', label: 'Subscriptions', icon: ICONS.subscriptions },
+      { key: 'savings', label: 'Savings', icon: ICONS.savings },
     ],
   },
   {
@@ -170,6 +173,7 @@ export default function App() {
           {view === 'analytics' && <Analytics />}
           {view === 'trends' && <Trends />}
           {view === 'subscriptions' && <Subscriptions />}
+          {view === 'savings' && <Savings />}
           {view === 'categories' && <Categories />}
           {view === 'reports' && <Reports />}
           {view === 'settings' && <Settings />}

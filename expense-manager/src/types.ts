@@ -146,4 +146,4 @@ export interface AppData {
 
 export type ViewKey =
   | 'dashboard' | 'transactions' | 'analytics'
-  | 'trends' | 'subscriptions' | 'categories' | 'reports' | 'settings';
+  | 'trends' | 'subscriptions' | 'savings' | 'categories' | 'reports' | 'settings';
