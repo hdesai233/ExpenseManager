@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import {
   categoryAnomalies, categoryMovers, categorySpend, dayOfWeekSpend, monthlySeries,
-  rollingAverage, spendStats, unusualCharges,
+  rollingAverage, spendDistribution, spendStats, txnsInCategoryWindow, unusualCharges,
+  type CategoryMove, type Distribution,
 } from '../lib/analytics';
-import { currentYM, monthLabel, monthShort, shortDate, usd } from '../lib/format';
-import { categoryName, useStore } from '../store';
-import { BarChartH, StackedBarChart, TrendChart } from '../components/ui';
+import { currentYM, monthLabel, monthShort, shortDate, usd, usd2 } from '../lib/format';
+import { accountName, categoryName, useStore } from '../store';
+import { BarChartH, Modal, StackedBarChart, TrendChart } from '../components/ui';
+import type { Category } from '../types';
 
 // ---- Expense trends: what changed, what's drifting, what's unusual ----
 // Replaces the old Budgets & Goals screen. Nothing here compares against a target — every panel
@@ -47,6 +49,18 @@ export default function Trends() {
     color: c.category.color || CAT_COLORS[i % CAT_COLORS.length],
     values: series.map(s => categorySpend(txns, c.category.id, s.ym)),
   })), [topCategories, series, txns]);
+
+  // Trip-size distribution per top category, over the same window as the rest of the page —
+  // a category total says "how much"; this says "what does a typical charge look like, and
+  // which ones didn't" (§ recommendation #8).
+  const sinceYM = series[0]?.ym ?? ym;
+  const distributions = useMemo(
+    () => topCategories
+      .map(c => ({ category: c.category, dist: spendDistribution(txnsInCategoryWindow(txns, c.category.id, null, sinceYM)) }))
+      .filter(d => d.dist.count > 0),
+    [topCategories, txns, sinceYM],
+  );
+  const [distDetail, setDistDetail] = useState<{ category: Category; dist: Distribution } | null>(null);
 
   // spendStats ignores months with no activity, so label the average with that count rather than
   // the selected window — otherwise "across 24 months" would describe an average over 6.
@@ -201,6 +215,51 @@ export default function Trends() {
             </div>
           </div>
 
+          {/* trip-size distribution per category */}
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="card-title" style={{ marginBottom: 4 }}>Spend distribution by category</div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 12 }}>
+              Totals hide the shape of your spending — a category can average out to a normal
+              number while being mostly small charges plus a few big ones. Click a row to see
+              which charges those were.
+            </div>
+            {distributions.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>
+                Not enough spending in this window yet.
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 70px 90px 130px 90px', padding: '0 2px 8px', fontSize: 10.5, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase' }}>
+                  <div>Category</div><div style={{ textAlign: 'right' }}>Trips</div><div style={{ textAlign: 'right' }}>Median</div><div style={{ textAlign: 'right' }}>Typical range</div><div style={{ textAlign: 'right' }}>Outliers</div>
+                </div>
+                {distributions.map(({ category, dist }) => (
+                  <button
+                    key={category.id}
+                    onClick={() => setDistDetail({ category, dist })}
+                    style={{
+                      display: 'grid', gridTemplateColumns: '1.4fr 70px 90px 130px 90px', width: '100%', textAlign: 'left', font: 'inherit',
+                      alignItems: 'center', gap: 0, padding: '9px 2px', borderTop: '1px solid #f2efe8', border: 'none', borderTopWidth: 1,
+                      background: 'none', cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <span className="dot" style={{ width: 8, height: 8, background: category.color, flex: 'none' }} />
+                      <span className="ellip" style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500 }}>{category.name}</span>
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>{dist.count}</div>
+                    <div style={{ textAlign: 'right', fontSize: 12.5, fontWeight: 600, color: 'var(--ink)' }}>{usd2(dist.median)}</div>
+                    <div style={{ textAlign: 'right', fontSize: 11.5, color: 'var(--muted-2)' }}>{usd2(dist.p25)}–{usd2(dist.p75)}</div>
+                    <div style={{ textAlign: 'right' }}>
+                      {dist.outliers.length > 0
+                        ? <span className="tag-badge" style={{ color: 'var(--amber)', background: 'var(--amber-bg)' }}>{dist.outliers.length}</span>
+                        : <span style={{ fontSize: 11.5, color: 'var(--muted-3)' }}>—</span>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* unusual charges */}
           <div className="card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -242,7 +301,57 @@ export default function Trends() {
           </div>
         </>
       )}
+
+      {distDetail && <CategoryDistributionModal category={distDetail.category} dist={distDetail.dist} onClose={() => setDistDetail(null)} />}
     </div>
+  );
+}
+
+/** Drill-down behind a "Spend distribution by category" row: the stats plus the actual outlier
+ * charges (Tukey upper fence) that pulled the category's average away from its median. */
+function CategoryDistributionModal({ category, dist, onClose }: { category: Category; dist: Distribution; onClose: () => void }) {
+  const { state } = useStore();
+  const upperFence = dist.p75 + 1.5 * (dist.p75 - dist.p25);
+
+  return (
+    <Modal title={category.name} onClose={onClose}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 18 }}>
+        <div className="card" style={{ padding: '12px 14px' }}>
+          <div className="kicker">Median trip</div>
+          <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--ink)', marginTop: 5 }}>{usd2(dist.median)}</div>
+        </div>
+        <div className="card" style={{ padding: '12px 14px' }}>
+          <div className="kicker">Typical range</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', marginTop: 5 }}>{usd2(dist.p25)}–{usd2(dist.p75)}</div>
+        </div>
+        <div className="card" style={{ padding: '12px 14px' }}>
+          <div className="kicker">Trips</div>
+          <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--ink)', marginTop: 5 }}>{dist.count}</div>
+        </div>
+      </div>
+
+      {dist.outliers.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>
+          Nothing unusually large in this window.
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 10 }}>
+            {dist.outliers.length} trip{dist.outliers.length === 1 ? '' : 's'} above {usd2(upperFence)} — well outside the typical range for this category.
+          </div>
+          <div style={{ border: '1px solid var(--card-border)', borderRadius: 10, overflow: 'hidden' }}>
+            {dist.outliers.map(t => (
+              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', borderBottom: '1px solid var(--row-border)' }}>
+                <span style={{ fontSize: 11.5, color: 'var(--muted-2)', width: 62, flex: 'none' }}>{shortDate(t.date)}</span>
+                <span className="ellip" style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500 }}>{t.merchantNormalized}</span>
+                <span style={{ fontSize: 11.5, color: 'var(--muted-2)', flex: 'none' }}>{accountName(state, t.accountId)}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 'none', width: 78, textAlign: 'right' }}>{usd2(-t.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -294,7 +403,7 @@ function Legend({ color, label }: { color: string; label: string }) {
 
 function MoverCard({ title, subtitle, movers, up }: {
   title: string; subtitle: string; up?: boolean;
-  movers: Array<{ category: { id: string; name: string; color: string }; current: number; previous: number; delta: number; pctChange: number; isNew: boolean }>;
+  movers: CategoryMove[];
 }) {
   const accent = up ? 'var(--red)' : 'var(--green-ok)';
   return (
@@ -308,19 +417,26 @@ function MoverCard({ title, subtitle, movers, up }: {
           Nothing {up ? 'went up' : 'came down'} this month.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
           {movers.map(m => (
-            <div key={m.category.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className="dot" style={{ width: 8, height: 8, background: m.category.color, flex: 'none' }} />
-              <span className="ellip" style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500 }}>
-                {m.category.name}
-              </span>
-              <span style={{ fontSize: 11.5, color: 'var(--muted-2)', flex: 'none' }}>
-                {m.isNew ? 'new' : `${usd(m.previous)} → ${usd(m.current)}`}
-              </span>
-              <span style={{ width: 74, textAlign: 'right', fontSize: 12.5, fontWeight: 600, color: accent, flex: 'none' }}>
-                {m.delta > 0 ? '+' : ''}{usd(m.delta)}
-              </span>
+            <div key={m.category.id}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="dot" style={{ width: 8, height: 8, background: m.category.color, flex: 'none' }} />
+                <span className="ellip" style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500 }}>
+                  {m.category.name}
+                </span>
+                <span style={{ width: 74, textAlign: 'right', fontSize: 12.5, fontWeight: 600, color: accent, flex: 'none' }}>
+                  {m.delta > 0 ? '+' : ''}{usd(m.delta)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, paddingLeft: 16 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>
+                  {m.isNew ? 'new this month' : `${usd(m.previous)} → ${usd(m.current)}`}
+                </span>
+                <span title="Share of that month's total spend — normalizes away an overall spend swing" style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>
+                  {Math.round(m.previousShare * 100)}% → {Math.round(m.currentShare * 100)}% of spend
+                </span>
+              </div>
             </div>
           ))}
         </div>

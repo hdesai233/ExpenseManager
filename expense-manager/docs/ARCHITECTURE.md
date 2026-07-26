@@ -28,8 +28,9 @@ Two consequences worth knowing before reading further:
 
 Comparison against history replaces comparison against targets: see
 `categoryMovers`, `spendStats`, `rollingAverage`, `unusualCharges`,
-`categoryAnomalies`, `dayOfWeekSpend`, `spendPace`, and `merchantTrends`
-in `lib/analytics.ts`, surfaced on the Trends and Analytics screens.
+`categoryAnomalies`, `dayOfWeekSpend`, `spendPace`, `merchantTrends`,
+`merchantChurn`, and `spendDistribution` in `lib/analytics.ts`, surfaced
+on the Trends and Analytics screens.
 
 A recurring hazard across all of these: never construct a `Date` from a
 raw ISO string (`new Date(t.date)`) — `Date` parses a bare `YYYY-MM-DD`
@@ -392,6 +393,92 @@ Malformed model output degrades to safe defaults rather than a crash: `normalize
 (`lib/api.ts`) clamps an unrecognized `intent` to `"list"` and an unrecognized `date_range` to
 `"all_time"`, so the worst case is an overly broad result set, never a thrown type error deep in
 the executor.
+
+## 6e. Merchant identity: local fuzzy clustering
+
+normalize.ts's regex list unifies the merchant variants it knows about, but it's a fixed,
+hand-maintained list — it can't catch a POS-string shape it's never seen. Every merchant-level
+analytic (top merchants, trends, churn, the merchant detail view) degrades a little for each
+variant that slips through, since "Coffee Bar" and "Coffee Bar Downtown" then read as two small
+merchants instead of one bigger one. `lib/merchantCluster.ts`'s `clusterMerchants` catches these
+locally — no AI, no network — by clustering `merchantNormalized` strings that are similar enough
+to plausibly be the same place:
+
+- Two names merge only when **both** a trigram-Jaccard similarity (≥0.5) and a normalized
+  Levenshtein similarity (≥0.55) clear their threshold, *or* one name appears inside the other at
+  a word boundary ("coffee bar" inside "the coffee bar downtown", but not "art" inside "kmart").
+  Requiring two independent signals — or word-boundary containment, which has a much lower false-
+  positive rate than either similarity metric alone — is what keeps merges rare on real bank
+  description data; either metric alone is fooled by short/common substrings or transpositions
+  often enough to be unusable unsupervised.
+- A minimum length (4 chars) and a minimum length-ratio (shorter/longer ≥ 0.5) guard against two
+  failure modes an unguarded similarity score would hit: short-name collisions ("CVS" vs. "CVX")
+  and a generic short name accidentally swallowing an unrelated long one ("Gym" vs. "Gym Downtown
+  Fitness Center And Spa Complex"). The length-ratio guard is also what keeps a deliberate brand
+  extension like "Uber" / "Uber Eats" apart — normalize.ts already keeps those separate via its
+  own regex ordering, and the clustering layer must not quietly undo that if it ever sees both
+  spelled out raw.
+- Clustering is **display/aggregation only** — `merchantCanonicalMap(txns)` (`lib/analytics.ts`)
+  builds a `merchantNormalized → canonical name` map from a transaction list, consumed by
+  `topMerchants`, `merchantTrends` (and therefore `merchantChurn`), and the merchant detail
+  modal's `merchantTransactions`. It is never written back to `Transaction.merchantNormalized`,
+  so rules, learned categorization, and `settings.dismissedSubscriptions` (all keyed on the
+  stored name) are completely unaffected. `detectRecurring` and `unusualCharges` are deliberately
+  **not** wired to canonical identity in this pass — both have their own established per-merchant
+  bucketing that subscription dismissal and price-change detection already depend on being
+  exact-name-keyed, and folding clustering into them is future work, not a silent behavior change
+  bundled in here.
+- The canonical name for a cluster is its most-frequent member (ties broken by shorter, then
+  alphabetical) — the most-seen variant is usually the cleanest-looking one, and picking
+  deterministically means the same cluster always displays the same name across screens.
+
+## 6f. Merchant detail, churn, and per-category spend distribution
+
+Categories have always had a drill-down (`CategoryDrilldownModal` in Reports.tsx); merchants
+didn't, despite being the other natural axis to cut spend by. Three additions close that gap,
+all built from the same handful of primitives:
+
+- **Merchant detail** (`components/MerchantDetailModal.tsx`, opened from Analytics' top-merchants
+  list and the churn panel below): total spend, charge count, first/last seen, a category
+  breakdown (a merchant can map to more than one category over time — Amazon is the obvious
+  case), and every underlying charge, resolved via `merchantCanonicalMap` +
+  `merchantTransactions` so clustered variants show up as one merchant with a disclosed "Also
+  matched: …" list rather than silently merged with no way to audit it.
+- **Merchant churn** (`merchantChurn`, a card on Analytics below Top merchants): the mirror of
+  `merchantTrends`' rising/falling list — merchants with ≥2 charges in the prior 3-month window
+  and zero in the recent one. It's the same recent/prior computation `merchantTrends` already
+  does (now also tracking each window's `lastDate`, added non-breakingly to `MerchantTrend`),
+  just filtered and re-sorted for "you stopped going to X" instead of "X is up/down" — often the
+  more actionable read of the two, since a still-frequent merchant creeping in price is
+  background noise next to a merchant that quietly disappeared.
+- **Spend distribution by category** (`spendDistribution` + `txnsInCategoryWindow`, a card on
+  Trends): a category total says "how much"; this says "what does a typical charge look like, and
+  which ones didn't." `spendDistribution` computes median/p25/p75/mean over whatever transactions
+  the caller already selected, and flags outliers with the classic Tukey upper fence
+  (p75 + 1.5×IQR) — a standard, parameter-free definition of "unusually large for this set,"
+  rather than an arbitrary multiple invented for this feature. The same function powers both this
+  panel and the merchant detail modal's basket-size stats, since both are the same statistical
+  question over a different slice of transactions.
+
+  **A category that mixes one large recurring bill with several small ones will flag the big bill
+  as an "outlier" even though it's completely predictable** — Housing (rent + utilities) is the
+  clearest example in the sample data: rent is $1,450 every single month, but relative to
+  Housing's much smaller utility charges it sits well above the category's Tukey fence, so it
+  shows up in the outliers list every time. This is mathematically correct — it *is* far from the
+  rest of that category's charge sizes — but it answers a different question than "Unusual
+  charges this month" (`unusualCharges`, the existing panel just below it), which compares a
+  charge against *that specific merchant's own* history and would never flag a stable recurring
+  rent payment. The two panels are deliberately different lenses — shape-of-a-category vs.
+  surprise-for-a-merchant — and can disagree on the same transaction without either being wrong.
+
+`categoryMovers` also gained **share-of-wallet** fields (`currentShare`/`previousShare`/
+`shareDelta`, surfaced on both Dashboard's "What changed" panel and Trends' mover cards) alongside
+its existing dollar `delta`. Dollars answer "did this category grow?"; share answers "did this
+category take a bigger slice of the pie?" — dividing by each month's own `monthlySpend` total
+normalizes away a swing in *overall* spend that would otherwise move every category's dollar
+delta in the same direction. The two numbers can point opposite ways on the same category (see
+Housing in the sample data: dollars flat-to-down, share up, because everything else fell more)
+and that disagreement is itself the useful signal, not a contradiction to resolve.
 
 ## 7. Categories, splits, and referential integrity
 

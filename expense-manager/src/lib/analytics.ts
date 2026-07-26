@@ -1,5 +1,6 @@
 import type { Account, Category, Transaction } from '../types';
 import { addDaysISO, addMonths, currentYM, daysInMonth, todayISO, toYM } from './format';
+import { clusterMerchants } from './merchantCluster';
 
 // ---- Aggregations, forecasting, recurring detection (§4.5, §4.8) ----
 // Ledger tracks spending only: there is no income, savings, or budget math here.
@@ -306,15 +307,35 @@ export function monthlySeries(txns: Transaction[], months: number, anchorYm?: st
   return out;
 }
 
+// ---- Merchant identity: local fuzzy clustering (§ recommendation #10) ----
+
+/**
+ * Canonical merchant identity per distinct `merchantNormalized` value, via local fuzzy string
+ * clustering (`lib/merchantCluster.ts`) — display/aggregation only, never written back to a
+ * transaction, so rules, learned categorization, and subscription dismissal (all keyed on the
+ * stored `merchantNormalized`) are unaffected. Built from the *full* transaction list passed in,
+ * not whatever narrower window a caller is about to filter to, so the same canonical name is
+ * chosen everywhere regardless of which analytic is asking.
+ */
+export function merchantCanonicalMap(txns: Transaction[]): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const t of txns) {
+    if (!isSpend(t)) continue;
+    counts.set(t.merchantNormalized, (counts.get(t.merchantNormalized) ?? 0) + 1);
+  }
+  return clusterMerchants(counts);
+}
+
 // ---- Top merchants ----
 
 export interface MerchantAgg { name: string; amount: number; count: number; categoryId: string | null }
 
 export function topMerchants(txns: Transaction[], sinceYM: string, limit: number): MerchantAgg[] {
+  const canon = merchantCanonicalMap(txns);
   const map = new Map<string, MerchantAgg>();
   for (const t of txns) {
     if (!isSpend(t) || toYM(t.date) < sinceYM) continue;
-    const key = t.merchantNormalized;
+    const key = canon.get(t.merchantNormalized) ?? t.merchantNormalized;
     const cur = map.get(key) ?? { name: key, amount: 0, count: 0, categoryId: t.categoryId };
     cur.amount += spendOf(t);
     if (t.amount < 0) cur.count += 1;
@@ -329,8 +350,10 @@ export interface MerchantTrend {
   categoryId: string | null;
   recentAmount: number;
   recentCount: number;
+  recentLastDate: string | null;
   priorAmount: number;
   priorCount: number;
+  priorLastDate: string | null;
   amountDelta: number;
   countDelta: number;
 }
@@ -341,21 +364,24 @@ export interface MerchantTrend {
  * top-merchants-by-amount ranking, which is why this tracks count alongside amount.
  */
 export function merchantTrends(txns: Transaction[], ym: string, windowMonths = 3): MerchantTrend[] {
+  const canon = merchantCanonicalMap(txns);
   const recentStart = addMonths(ym, -(windowMonths - 1));
   const priorEnd = addMonths(recentStart, -1);
   const priorStart = addMonths(priorEnd, -(windowMonths - 1));
 
   const bucket = (fromYm: string, toYm: string) => {
-    const map = new Map<string, { amount: number; count: number; categoryId: string | null }>();
+    const map = new Map<string, { amount: number; count: number; categoryId: string | null; lastDate: string }>();
     for (const t of txns) {
       if (!isSpend(t)) continue;
       const tym = toYM(t.date);
       if (tym < fromYm || tym > toYm) continue;
-      const cur = map.get(t.merchantNormalized) ?? { amount: 0, count: 0, categoryId: t.categoryId };
+      const key = canon.get(t.merchantNormalized) ?? t.merchantNormalized;
+      const cur = map.get(key) ?? { amount: 0, count: 0, categoryId: t.categoryId, lastDate: t.date };
       cur.amount += spendOf(t);
       if (t.amount < 0) cur.count += 1; // count charges, not refunds
       if (t.categoryId) cur.categoryId = t.categoryId;
-      map.set(t.merchantNormalized, cur);
+      if (t.date > cur.lastDate) cur.lastDate = t.date;
+      map.set(key, cur);
     }
     return map;
   };
@@ -374,13 +400,37 @@ export function merchantTrends(txns: Transaction[], ym: string, windowMonths = 3
       categoryId: r?.categoryId ?? p?.categoryId ?? null,
       recentAmount: r?.amount ?? 0,
       recentCount: r?.count ?? 0,
+      recentLastDate: r?.lastDate ?? null,
       priorAmount: p?.amount ?? 0,
       priorCount: p?.count ?? 0,
+      priorLastDate: p?.lastDate ?? null,
       amountDelta: (r?.amount ?? 0) - (p?.amount ?? 0),
       countDelta: (r?.count ?? 0) - (p?.count ?? 0),
     });
   }
   return out.sort((a, b) => Math.abs(b.amountDelta) - Math.abs(a.amountDelta));
+}
+
+/**
+ * Merchants with meaningful prior-window activity but zero charges in the recent window — the
+ * mirror of merchantTrends' rising/falling list. "You stopped going to X" is the same computation
+ * as the up/down trend, just filtered and re-sorted for that specific story, which is often the
+ * more actionable one (a still-frequent merchant creeping up in price is background noise; a
+ * merchant that quietly disappeared is either a forgotten cancellation or a deliberate change
+ * worth noticing).
+ */
+export function merchantChurn(txns: Transaction[], ym: string, windowMonths = 3): MerchantTrend[] {
+  return merchantTrends(txns, ym, windowMonths)
+    .filter(m => m.recentCount === 0 && m.priorCount >= 2)
+    .sort((a, b) => b.priorAmount - a.priorAmount);
+}
+
+/** All spend transactions belonging to a merchant's canonical cluster — the "all variants" view
+ * behind the merchant detail modal. `canonicalName` should come from `merchantCanonicalMap`. */
+export function merchantTransactions(txns: Transaction[], canon: Map<string, string>, canonicalName: string): Transaction[] {
+  return txns
+    .filter(t => isSpend(t) && (canon.get(t.merchantNormalized) ?? t.merchantNormalized) === canonicalName)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
 }
 
 // ---- Recurring / subscription detection (§4.8: merchant + amount + interval clustering) ----
@@ -523,14 +573,26 @@ export interface CategoryMove {
   delta: number;      // positive = spending went up
   pctChange: number;  // 0 when there's no prior spend to compare against
   isNew: boolean;     // spent this month, nothing the month before
+  currentShare: number;   // this category's fraction of *total* spend this month (0 when total is 0)
+  previousShare: number;  // same, for the prior month
+  shareDelta: number;     // currentShare - previousShare, in share points (0.09 = +9pp)
 }
 
 /**
  * Month-over-month movement per top-level category, biggest absolute change first.
  * Answers "what changed?" rather than "did I stay under a limit?".
+ *
+ * `delta`/`pctChange` are dollar-denominated and answer "did this category grow?" — but a month
+ * where *everything* went up (a big trip, a slow month elsewhere) moves every category's dollars
+ * without changing what your spend actually goes to. `currentShare`/`previousShare`/`shareDelta`
+ * answer the complementary question — "did this category take a bigger slice of the pie?" — by
+ * normalizing against each month's own total, so it survives an overall spend swing that would
+ * otherwise drag every category's dollar delta in the same direction.
  */
 export function categoryMovers(txns: Transaction[], categories: Category[], ym: string): CategoryMove[] {
   const prevYm = addMonths(ym, -1);
+  const totalCurrent = monthlySpend(txns, ym);
+  const totalPrevious = monthlySpend(txns, prevYm);
 
   return categories
     .filter(c => !c.parentId)
@@ -538,6 +600,8 @@ export function categoryMovers(txns: Transaction[], categories: Category[], ym: 
       const current = categorySpend(txns, category.id, ym);
       const previous = categorySpend(txns, category.id, prevYm);
       const delta = current - previous;
+      const currentShare = totalCurrent > 0.005 ? current / totalCurrent : 0;
+      const previousShare = totalPrevious > 0.005 ? previous / totalPrevious : 0;
       return {
         category,
         current,
@@ -545,6 +609,9 @@ export function categoryMovers(txns: Transaction[], categories: Category[], ym: 
         delta,
         pctChange: previous > 0.005 ? delta / previous : 0,
         isNew: previous <= 0.005 && current > 0.005,
+        currentShare,
+        previousShare,
+        shareDelta: currentShare - previousShare,
       };
     })
     .filter(m => Math.abs(m.delta) > 0.005)
@@ -647,4 +714,79 @@ export function categoryAnomalies(
     }
   }
   return out.sort((a, b) => b.ratio - a.ratio);
+}
+
+// ---- Transaction-size distribution (§ recommendation #8) ----
+
+/** Linear-interpolated percentile over an already-ascending-sorted array (p in [0,1]). */
+function percentile(sortedAsc: number[], p: number): number {
+  if (!sortedAsc.length) return 0;
+  const idx = p * (sortedAsc.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sortedAsc[lo];
+  return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (idx - lo);
+}
+
+export interface Distribution {
+  count: number;
+  min: number;
+  max: number;
+  mean: number;
+  median: number;
+  p25: number;
+  p75: number;
+  /** Transactions above the classic Tukey upper fence (p75 + 1.5×IQR) — a standard, threshold-free
+   * definition of "unusually large for this set," biggest first. */
+  outliers: Transaction[];
+}
+
+const EMPTY_DISTRIBUTION: Distribution = { count: 0, min: 0, max: 0, mean: 0, median: 0, p25: 0, p75: 0, outliers: [] };
+
+/**
+ * Spend-size distribution over a set of transactions the caller has already selected (a
+ * merchant's history, a category's trips this window, …). Totals answer "how much" — this
+ * answers "what does a typical one of these look like, and which ones didn't." Reused as-is for
+ * both the merchant detail view and the per-category trip-size panel on Trends, since both are
+ * the same statistical question over a different slice of transactions.
+ */
+export function spendDistribution(txns: Transaction[]): Distribution {
+  const withAmt = txns
+    .filter(isSpend)
+    .map(t => ({ t, amt: spendOf(t) }))
+    .filter(x => x.amt > 0.005);
+  if (!withAmt.length) return EMPTY_DISTRIBUTION;
+
+  const amounts = withAmt.map(x => x.amt).sort((a, b) => a - b);
+  const p25 = percentile(amounts, 0.25);
+  const p75 = percentile(amounts, 0.75);
+  const upperFence = p75 + 1.5 * (p75 - p25);
+  const outliers = withAmt.filter(x => x.amt > upperFence).sort((a, b) => b.amt - a.amt).map(x => x.t);
+
+  return {
+    count: amounts.length,
+    min: amounts[0],
+    max: amounts[amounts.length - 1],
+    mean: amounts.reduce((a, b) => a + b, 0) / amounts.length,
+    median: median(amounts),
+    p25,
+    p75,
+    outliers,
+  };
+}
+
+/** True when a transaction (or any of its splits) touches the given category/subcategory —
+ * whole-transaction inclusion, not a fractional dollar share, since a "trip" is one event. */
+function touchesCategory(t: Transaction, categoryId: string, subcategoryId: string | null): boolean {
+  if (subcategoryId) {
+    if (t.subcategoryId === subcategoryId) return true;
+    return !!t.splits?.some(s => s.subcategoryId === subcategoryId);
+  }
+  if (t.categoryId === categoryId) return true;
+  return !!t.splits?.some(s => s.categoryId === categoryId);
+}
+
+/** Every spend transaction in a category (optionally a specific subcategory) from `sinceYM` on —
+ * the "trips" `spendDistribution` measures the size of. */
+export function txnsInCategoryWindow(txns: Transaction[], categoryId: string, subcategoryId: string | null, sinceYM: string): Transaction[] {
+  return txns.filter(t => isSpend(t) && toYM(t.date) >= sinceYM && touchesCategory(t, categoryId, subcategoryId));
 }

@@ -152,8 +152,25 @@ you get:
 - **Monthly spend** as a line, with a 3-month rolling average over it to
   separate a real drift from one noisy month.
 - **Spending more / Spending less** — the categories that moved most
-  versus last month, with the before and after figures.
+  versus last month, with the before-and-after dollar figures *and* what
+  share of your total spend that category represented before and after
+  (e.g. "22%→28% of spend"). The two can point different ways: a
+  category's dollars can hold flat or even dip while its *share* rises,
+  if everything else fell faster — that's not a contradiction, it's
+  telling you something the dollar figure alone can't.
 - **Category mix by month** and **total by category** for the window.
+- **Spend distribution by category** — median trip size, typical range
+  (25th–75th percentile), and a count of statistical outliers per
+  category, for the same window as the rest of the page. A category
+  total tells you "how much"; this tells you "what does a typical charge
+  here actually look like, and which ones didn't." Click any row to see
+  the specific outlier charges. Note this is a different question from
+  "Unusual charges" below it — a category that mixes one big regular
+  bill with several small ones (rent + utilities under Housing, say)
+  will flag the big bill as a statistical outlier every month even
+  though it's completely predictable, because "Unusual charges" compares
+  a charge to *that merchant's own* history while this compares it to
+  everything else in the category.
 - **Spend by day of week** — your average spend per weekday, so patterns
   like weekend dining or Friday impulse buys show up even though a
   monthly view smooths them out. This is an *average per occurrence*,
@@ -208,8 +225,21 @@ chart comparing that month's running total against the average of the
 prior three months at the same point ("through day 18 you're $140 above
 your typical pace" — an early warning, not just a month-end summary),
 merchant breakdowns (with a ▲/▼ badge when a merchant's visit frequency
-has shifted from its prior 3-month window), and a what-if simulator for
-modelling a spending cut.
+has shifted from its prior 3-month window), a **"merchants you've
+stopped visiting"** panel (the mirror of that trend — a merchant with
+real activity in the prior 3 months and none in the last 3, sorted by
+how much it used to account for), and a what-if simulator for modelling
+a spending cut.
+
+Click any merchant name (in Top merchants or the stopped-visiting list)
+to open its **detail view**: total spend, charge count, first/last seen,
+typical basket size (median and 25th–75th percentile range), which
+categories its spend maps to, and every underlying charge. Similar
+merchant names that likely refer to the same place ("Coffee Bar" and
+"Coffee Bar Downtown", say) are grouped together automatically — this
+runs entirely on-device using string similarity, no AI involved — and
+the detail view discloses exactly which raw names got merged under
+"Also matched" so you can see what happened rather than just trusting it.
 
 ## 9. Reports & Export
 

@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { addMonths, currentYM, monthShort, monthYearFull, shortDate, usd, usd2 } from '../lib/format';
 import {
-  categorySpend, dailySpendByAccount, forecastMonthSpend, isSpend, merchantTrends, monthlySeries,
-  monthlySpend, spendPace, topMerchants,
+  categorySpend, dailySpendByAccount, forecastMonthSpend, isSpend, merchantChurn, merchantTrends,
+  monthlySeries, monthlySpend, spendPace, topMerchants,
 } from '../lib/analytics';
-import { accountName, categoryName, useStore } from '../store';
+import { accountName, categoryColor, categoryName, useStore } from '../store';
 import { Modal, StackedBarChart, TrendChart } from '../components/ui';
+import MerchantDetailModal from '../components/MerchantDetailModal';
 import type { AppData } from '../types';
 
 export default function Analytics() {
@@ -71,6 +72,8 @@ export default function Analytics() {
   // ---- merchant trend: recent vs. prior 3-month window, matched onto the top-merchants list ----
   const merchTrends = useMemo(() => merchantTrends(txns, ym, 3), [txns, ym]);
   const trendByMerchant = new Map(merchTrends.map(t => [t.name, t]));
+  const churned = useMemo(() => merchantChurn(txns, ym, 3), [txns, ym]);
+  const [merchantDetail, setMerchantDetail] = useState<string | null>(null);
 
   return (
     <div className="page">
@@ -203,8 +206,12 @@ export default function Analytics() {
               return (
                 <div key={m.name}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-                    <span style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {m.name}
+                    <button
+                      onClick={() => setMerchantDetail(m.name)}
+                      title="View merchant detail"
+                      style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, textAlign: 'left', fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <span style={{ textDecoration: 'underline', textDecorationColor: 'var(--card-border)', textUnderlineOffset: 3 }}>{m.name}</span>
                       {trend && trend.countDelta !== 0 && (
                         <span
                           title={`${trend.recentCount}× recently vs. ${trend.priorCount}× before`}
@@ -213,7 +220,7 @@ export default function Analytics() {
                           {trend.countDelta > 0 ? '▲' : '▼'} {Math.abs(trend.countDelta)}
                         </span>
                       )}
-                    </span>
+                    </button>
                     <span style={{ fontSize: 12.5, color: 'var(--ink)', fontWeight: 600 }}>{usd(m.amount)}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -229,6 +236,47 @@ export default function Analytics() {
             })}
           </div>
         </div>
+      </div>
+
+      <div className="card" style={{ padding: '20px 22px', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div className="card-title" style={{ fontSize: 15 }}>Merchants you've stopped visiting</div>
+          {churned.length > 0 && <span className="pill-count">{churned.length}</span>}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 12 }}>
+          Had at least 2 charges in the prior 3 months, none in the last 3 — a forgotten
+          cancellation, or just a change worth noticing.
+        </div>
+        {churned.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '16px 0', textAlign: 'center' }}>
+            Nothing that was active before has gone quiet.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {churned.slice(0, 8).map(m => (
+              <button
+                key={m.name}
+                onClick={() => setMerchantDetail(m.name)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '9px 2px', borderTop: '1px solid #f2efe8',
+                  border: 'none', borderTopWidth: 1, background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', font: 'inherit',
+                }}
+              >
+                <span className="dot" style={{ width: 8, height: 8, background: categoryColor(state, m.categoryId), flex: 'none' }} />
+                <div className="ellip" style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--ink-3)', fontWeight: 500 }}>{m.name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted-2)', flex: 'none' }}>
+                  last charge {m.priorLastDate ? shortDate(m.priorLastDate) : '—'}
+                </div>
+                <div style={{ width: 90, textAlign: 'right', fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 'none' }}>
+                  {usd(m.priorAmount)}
+                </div>
+                <span className="tag-badge" style={{ flex: 'none', color: 'var(--muted)', background: 'var(--soft)' }}>
+                  {m.priorCount}× before
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* what-if simulator */}
@@ -289,6 +337,7 @@ export default function Analytics() {
           onClose={() => setDayDrilldown(null)}
         />
       )}
+      {merchantDetail && <MerchantDetailModal canonicalName={merchantDetail} onClose={() => setMerchantDetail(null)} />}
     </div>
   );
 }

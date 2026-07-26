@@ -201,11 +201,9 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
                       <span style={{ fontSize: 11, color: 'var(--muted-2)' }}>
                         {m.isNew ? 'New this month' : `${usd(m.previous)} → ${usd(m.current)}`}
                       </span>
-                      {!m.isNew && m.pctChange !== 0 && (
-                        <span style={{ fontSize: 11, color: 'var(--muted-2)' }}>
-                          {m.pctChange > 0 ? '+' : ''}{Math.round(m.pctChange * 100)}%
-                        </span>
-                      )}
+                      <span title="Share of that month's total spend" style={{ fontSize: 11, color: 'var(--muted-2)' }}>
+                        {Math.round(m.previousShare * 100)}%→{Math.round(m.currentShare * 100)}% of spend
+                      </span>
                     </div>
                   </div>
                 );
