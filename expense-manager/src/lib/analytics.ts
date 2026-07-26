@@ -58,6 +58,37 @@ export function dailySpendByAccount(txns: Transaction[], accounts: Account[], ym
   return { days, series };
 }
 
+export interface CumulativeSpend { days: number[]; values: Array<number | null> }
+
+/**
+ * Running-total spend across one month, day by day — a "growth" curve rather than a per-day
+ * amount. For the current month, days after today are `null` rather than the final running total
+ * held flat — they haven't happened yet, so freezing the line there would misleadingly read as
+ * "spending stopped" instead of "no data yet" (the same convention `spendPace` uses for its own
+ * cumulative curve, for the same reason).
+ */
+export function cumulativeSpend(txns: Transaction[], ym: string): CumulativeSpend {
+  const dim = daysInMonth(ym);
+  const isCurrent = ym === currentYM();
+  const todayDay = isCurrent ? Number(todayISO().slice(8, 10)) : dim;
+  const days = Array.from({ length: dim }, (_, i) => i + 1);
+  const daily = new Array(dim).fill(0);
+
+  for (const t of txnsInMonth(txns, ym)) {
+    if (!isSpend(t)) continue;
+    const day = Number(t.date.slice(8, 10));
+    daily[day - 1] += spendOf(t);
+  }
+
+  let running = 0;
+  const values = daily.map((v, i) => {
+    if (i + 1 > todayDay) return null;
+    running += v;
+    return running;
+  });
+  return { days, values };
+}
+
 export interface SpendPace {
   days: number[];
   current: Array<number | null>;   // cumulative spend through each day of `ym`; null past "today" for the current month

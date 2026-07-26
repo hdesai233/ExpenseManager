@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
-import { categoryMovers, forecastMonthSpend, isSpend, monthlySeries, monthlySpend, spendByCategory, spendOf, spendStats } from '../lib/analytics';
+import { categoryMovers, cumulativeSpend, forecastMonthSpend, isSpend, monthlySeries, monthlySpend, spendByCategory, spendOf, spendStats } from '../lib/analytics';
 import { needsReview } from '../lib/categorize';
-import { addMonths, currentYM, daysInMonth, monthShort, monthYearFull, shortDate, signedUsd2, usd } from '../lib/format';
-import { accountName, categoryColor, txnCategoryLabel, useStore } from '../store';
-import type { ViewKey } from '../types';
-import { Donut, TrendChart } from '../components/ui';
+import { transactionsInCategory } from '../lib/report';
+import { addMonths, currentYM, daysInMonth, monthShort, monthYearFull, shortDate, signedUsd2, usd, usd2 } from '../lib/format';
+import { accountName, categoryColor, categoryName, txnCategoryLabel, useStore } from '../store';
+import type { AppData, Transaction, ViewKey } from '../types';
+import { Donut, Modal, TrendChart } from '../components/ui';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -49,6 +50,11 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
   const trendPoints = isCurrentMonth
     ? [...series.map(m => ({ label: monthShort(m.ym), value: m.spend })), { label: 'proj', value: projected }]
     : series.map(m => ({ label: monthShort(m.ym), value: m.spend }));
+
+  const cumulative = useMemo(() => cumulativeSpend(txns, ym), [txns, ym]);
+  const cumulativePoints = cumulative.days.map((d, i) => ({ label: String(d), value: cumulative.values[i] }));
+
+  const [drilldownCategoryId, setDrilldownCategoryId] = useState<string | null>(null);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -162,11 +168,16 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
             />
             <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 14px' }}>
               {cats.slice(0, 10).map(c => (
-                <div key={c.category.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="dot" style={{ width: 9, height: 9, background: c.category.color }} />
+                <button
+                  key={c.category.id}
+                  onClick={() => setDrilldownCategoryId(c.category.id)}
+                  title="View transactions in this category"
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, border: 'none', background: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', font: 'inherit', width: '100%' }}
+                >
+                  <span className="dot" style={{ width: 9, height: 9, background: c.category.color, flex: 'none' }} />
                   <span className="ellip" style={{ fontSize: 12, color: '#5c584f', flex: 1 }}>{c.category.name}</span>
-                  <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 500 }}>{Math.round(c.pct * 100)}%</span>
-                </div>
+                  <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 500, flex: 'none' }}>{Math.round(c.pct * 100)}%</span>
+                </button>
               ))}
             </div>
           </div>
@@ -286,6 +297,15 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
         </div>
       </div>
 
+      {/* cumulative spend growth within the selected month */}
+      <div className="card" style={{ marginTop: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div className="card-title">Spend growth{isCurrentMonth ? '' : ` — ${monthYearFull(ym)}`}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>Cumulative total for the month</div>
+        </div>
+        <TrendChart width={900} height={200} series={cumulativePoints} yTicks />
+      </div>
+
       {/* recent / largest transactions */}
       <div className="card" style={{ marginTop: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -321,6 +341,106 @@ export default function Dashboard({ go }: { go: (v: ViewKey) => void }) {
           ))}
         </div>
       </div>
+
+      {drilldownCategoryId && (
+        <CategoryDrilldownModal
+          state={state}
+          monthTxns={monthTxns}
+          categoryId={drilldownCategoryId}
+          monthLabel={isCurrentMonth ? 'this month' : monthYearFull(ym)}
+          onClose={() => setDrilldownCategoryId(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/** Drill-down from a "Spending by category" row: every transaction that contributed to that
+ * category's total this month (split-aware, via the same transactionsInCategory report.ts already
+ * uses for its own category drill-down — a split transaction counts if any of its splits land here). */
+function CategoryDrilldownModal({ state, monthTxns, categoryId, monthLabel, onClose }: {
+  state: AppData; monthTxns: Transaction[]; categoryId: string; monthLabel: string; onClose: () => void;
+}) {
+  const category = state.categories.find(c => c.id === categoryId);
+  const txns = useMemo(
+    () => transactionsInCategory(monthTxns, state.categories, categoryId).sort((a, b) => b.date.localeCompare(a.date)),
+    [monthTxns, state.categories, categoryId],
+  );
+  const total = txns.reduce((a, t) => a + spendOf(t), 0);
+
+  const exportCSV = () => {
+    const header = 'date,merchant,raw_description,amount,account,tags,notes';
+    const esc = (s: string) => '"' + s.replace(/"/g, '""') + '"';
+    const rows = txns.map(t => [
+      t.date, esc(t.merchantNormalized), esc(t.merchantRaw), t.amount.toFixed(2),
+      esc(accountName(state, t.accountId)), esc(t.tags.join(';')), esc(t.notes),
+    ].join(','));
+    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `ledger-${(category?.name ?? categoryId).toLowerCase().replace(/\s+/g, '-')}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <Modal
+      title={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span className="dot" style={{ width: 11, height: 11, background: category?.color ?? '#cdc7bb' }} />
+          {category?.name ?? 'Category'}
+        </div>
+      }
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>{monthLabel}</span>
+          <button className="btn-ghost" onClick={exportCSV} disabled={txns.length === 0}>Export CSV</button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+        <div>
+          <div className="kicker">Total</div>
+          <div className="big-num" style={{ margin: '4px 0' }}>{usd(total)}</div>
+        </div>
+        <div>
+          <div className="kicker">Transactions</div>
+          <div className="big-num" style={{ margin: '4px 0' }}>{txns.length}</div>
+        </div>
+      </div>
+
+      <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--soft-border)' }}>
+              <th style={{ textAlign: 'left', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Date</th>
+              <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Merchant</th>
+              <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Category</th>
+              <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Account</th>
+              <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--muted-3)', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase' }}>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {txns.length === 0 && (
+              <tr><td colSpan={5} style={{ padding: '20px 0', textAlign: 'center', color: 'var(--muted-2)' }}>No transactions.</td></tr>
+            )}
+            {txns.map(t => (
+              <tr key={t.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                <td style={{ padding: '6px 0', color: 'var(--muted)' }}>{shortDate(t.date)}</td>
+                <td style={{ padding: '6px 8px', color: 'var(--ink-3)' }}>
+                  {t.merchantNormalized}
+                  {t.splits && t.splits.length > 1 && <span style={{ marginLeft: 6, fontSize: 10.5, color: 'var(--muted-3)' }}>split</span>}
+                </td>
+                <td style={{ padding: '6px 8px', color: 'var(--muted-2)' }}>{categoryName(state, t.subcategoryId ?? t.categoryId)}</td>
+                <td style={{ padding: '6px 8px', color: 'var(--muted-2)' }}>{accountName(state, t.accountId)}</td>
+                <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, color: 'var(--ink)' }}>{usd2(t.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
   );
 }

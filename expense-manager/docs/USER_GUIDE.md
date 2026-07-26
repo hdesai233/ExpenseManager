@@ -214,11 +214,17 @@ across how many charges, how that compares with your recent average, the
 category that moved most, a projected month-end **range** (not a single
 number — it separates known recurring bills still due from a statistical
 projection of everything else, so the width of the range reflects real
-uncertainty rather than false precision), your category breakdown, and
-what changed versus last month. The transactions list at the bottom
-toggles between **Recent** (most recent first) and **Largest** (biggest
-expenses first, transfers and card payments excluded) for whichever
-month you're viewing. **Analytics** goes deeper
+uncertainty rather than false precision), your category breakdown
+(click any category in the legend to drill into exactly which
+transactions make up that slice, with its own CSV export), what
+changed versus last month, and a **spend growth** line — the running
+(cumulative) total for the month you're viewing, day by day, so you can
+see the pace it built up at rather than just the final number. For the
+current month it stops at today rather than continuing flat for days
+that haven't happened yet. The transactions
+list at the bottom toggles between **Recent** (most recent first) and
+**Largest** (biggest expenses first, transfers and card payments
+excluded) for whichever month you're viewing. **Analytics** goes deeper
 — spend by month, a day-by-day breakdown of one month split by account
 (navigate with the arrows next to the month label; click any bar to see
 that day's transactions — click a specific account's colored segment to
