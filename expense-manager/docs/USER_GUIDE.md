@@ -270,7 +270,9 @@ For each report you can toggle which sections are included, then:
 - **Hover for exact values**: every point on "Monthly spend trend" (and
   the other trend charts throughout the app) shows the precise month and
   amount on hover — handy on Annual / Year-in-Review, where the line
-  alone only gives you the shape.
+  alone only gives you the shape. "Monthly spend trend" also prints each
+  month's amount directly above its point, since hovering doesn't work
+  once the report is on paper or in a PDF.
 - **Export as PDF** (desktop app only) or **Print** (works in browser
   mode too, via your browser's print-to-PDF).
 - **Export a chart image** (e.g. the category pie chart) as PNG/SVG.

@@ -612,6 +612,18 @@ caught by checking Analytics' forecast chart specifically (Reports'
 "Monthly spend trend" never has a forecast tail, so it wouldn't have
 surfaced there).
 
+The hover tooltip is invisible on paper, so `TrendChart` also takes an
+optional `showValues` prop — a compact (`compactUsd`, the same "$1.2k"
+formatter `BarChartH` uses) `<text>` label drawn above each point,
+opted into only by Reports' "Monthly spend trend" chart rather than
+turned on everywhere, so the denser multi-series charts elsewhere
+(Dashboard, Analytics, Trends) stay uncluttered and rely on hover as
+before. It reads for free off the vertical headroom `max` already
+reserves above the highest point (`rawMax + span * 0.15`) — added
+originally just to keep the line off the top edge — rather than needing
+its own collision logic; `padT` grows slightly (16 → 28) when the prop
+is on to give that top row of labels room to clear the chart's edge.
+
 ## 9. Build & packaging
 
 - `npm run dev` — Vite only, browser-fallback mode, hot reload, fastest

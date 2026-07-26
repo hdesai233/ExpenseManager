@@ -448,7 +448,7 @@ export default function Reports() {
                 </EmptyNote>
               ) : (
                 <div className="no-print-inline" style={{ position: 'relative' }}>
-                  <div ref={trendRef}><TrendChart width={640} height={180} series={trendPoints} forecastIndex={trendPoints.length} yTicks /></div>
+                  <div ref={trendRef}><TrendChart width={640} height={180} series={trendPoints} forecastIndex={trendPoints.length} yTicks showValues /></div>
                   <ChartExportButtons onExport={f => exportChart('trend', f)} />
                 </div>
               )}

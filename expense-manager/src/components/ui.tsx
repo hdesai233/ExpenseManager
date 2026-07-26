@@ -57,14 +57,16 @@ export interface TrendPoint { label: string; value: number | null }
 /**
  * Line chart with optional forecast tail and comparison line, matching the design's SVG style.
  */
-export function TrendChart({ width, height, series, compare, forecastIndex, yTicks }: {
+export function TrendChart({ width, height, series, compare, forecastIndex, yTicks, showValues }: {
   width: number; height: number;
   series: TrendPoint[];
   compare?: Array<number | null>;
   forecastIndex?: number;        // index from which the line is dashed amber
   yTicks?: boolean;
+  /** Print/PDF value labels above each point — hover tooltips (below) don't work on paper. */
+  showValues?: boolean;
 }) {
-  const padT = 16, padB = 26, padL = yTicks ? 34 : 8, padR = 10;
+  const padT = showValues ? 28 : 16, padB = 26, padL = yTicks ? 34 : 8, padR = 10;
   const vals = [
     ...series.map(s => s.value).filter((v): v is number => v !== null),
     ...(compare ?? []).filter((v): v is number => v !== null),
@@ -110,6 +112,13 @@ export function TrendChart({ width, height, series, compare, forecastIndex, yTic
       )}
       {series.map((s, i) => (
         <text key={'l' + i} x={xAt(i)} y={height - 8} fill="#a09c92" fontSize="10.5" textAnchor="middle">{s.label}</text>
+      ))}
+      {/* Static value labels for contexts a hover can't reach — print and PDF export. The 15%
+          headroom `max` already reserves above the highest point is what gives these room. */}
+      {showValues && series.map((s, i) => s.value === null ? null : (
+        <text key={'v' + i} x={xAt(i)} y={yAt(s.value) - 8} fill="#5c584f" fontSize="9.5" fontWeight="600" textAnchor="middle">
+          {compactUsd(s.value)}
+        </text>
       ))}
       {/* Invisible, generously-sized hover targets — a native <title> gives a tooltip with the
           exact value for free, with no extra state or hover-tracking JS. */}
