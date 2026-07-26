@@ -1,5 +1,10 @@
 import type { AppData, Category, Transaction } from '../types';
-import { isSpend, spendOf, spendByCategory, topMerchants, type CatSpend, type MerchantAgg } from './analytics';
+import {
+  isSpend, spendOf, spendByCategory, topMerchants, categoryMovers, merchantChurn,
+  fixedVsVariableSpend, detectRecurring, upcomingCharges,
+  type CatSpend, type MerchantAgg, type CategoryMove, type MerchantTrend,
+  type FixedVariableSplit, type RecurringCharge, type UpcomingCharge,
+} from './analytics';
 import { addMonths, currentYM, monthShort, todayISO, toYM } from './format';
 
 // ---- Report engine (§4.9): builds report data for any date range; rendering + PDF/print ----
@@ -14,12 +19,14 @@ export interface ReportSections {
   categoryTrend: boolean;
   topMerchants: boolean;
   trend: boolean;
+  monthOverMonth: boolean;
+  subscriptions: boolean;
   transactions: boolean;
 }
 
 export const DEFAULT_SECTIONS: ReportSections = {
   summary: true, categoryBreakdown: true, categoryDetail: false, categoryTrend: false,
-  topMerchants: true, trend: true, transactions: false,
+  topMerchants: true, trend: true, monthOverMonth: true, subscriptions: true, transactions: false,
 };
 
 export interface ReportTemplateDef {
@@ -31,13 +38,13 @@ export interface ReportTemplateDef {
 }
 
 export const REPORT_TEMPLATES: ReportTemplateDef[] = [
-  { key: 'monthly', label: 'Monthly Summary', description: 'Spend, categories, and top merchants for one month.', defaultSections: DEFAULT_SECTIONS, fixedRange: true },
+  { key: 'monthly', label: 'Monthly Summary', description: 'Spend, categories, top merchants, what changed vs. last month, and recurring charges for one month.', defaultSections: DEFAULT_SECTIONS, fixedRange: true },
   { key: 'annual', label: 'Annual / Year-in-Review', description: 'A full calendar year, with the month-by-month trend front and center.', defaultSections: DEFAULT_SECTIONS, fixedRange: true },
   {
     key: 'expense',
     label: 'Expense Breakdown',
     description: 'Where the money actually went — every category and subcategory, charted.',
-    defaultSections: { ...DEFAULT_SECTIONS, categoryDetail: true, categoryTrend: true, trend: false },
+    defaultSections: { ...DEFAULT_SECTIONS, categoryDetail: true, categoryTrend: true, trend: false, monthOverMonth: false, subscriptions: false },
     fixedRange: true,
   },
   { key: 'custom', label: 'Custom Date Range', description: 'Pick any start and end date.', defaultSections: DEFAULT_SECTIONS, fixedRange: false },
@@ -218,6 +225,15 @@ function buildCategoryTrend(
   return picked.map(r => ({ category: r.category, values: acc.get(r.category.id)! }));
 }
 
+/** Category movers + merchant churn vs. the prior calendar month — only meaningful when the
+ * report covers exactly one calendar month, since both are anchored on a single `ym`. */
+export interface MonthOverMonth { movers: CategoryMove[]; churn: MerchantTrend[] }
+
+/** Recurring-charge snapshot: the fixed/variable split for the reported month, any price change
+ * detected within it, and what's coming up next (real-time, not tied to the report's own range —
+ * see the note on `subscriptions` below). Also single-month-only, for the same reason. */
+export interface ReportSubscriptions { split: FixedVariableSplit; priceChanges: RecurringCharge[]; upcoming: UpcomingCharge[] }
+
 export interface ReportData {
   title: string;
   range: ReportRange;
@@ -231,6 +247,11 @@ export interface ReportData {
   trend: Array<{ label: string; spend: number }>;
   transactions: Transaction[];
   monthCount: number;
+  /** null when the range doesn't cover exactly one calendar month (e.g. Annual, a multi-month
+   * Expense Breakdown, or a Custom range spanning more than one month) — there's no single prior
+   * month to compare against in that case. */
+  monthOverMonth: MonthOverMonth | null;
+  subscriptions: ReportSubscriptions | null;
   generatedAt: string;
 }
 
@@ -261,11 +282,39 @@ export function buildReport(data: AppData, range: ReportRange, title: string): R
   const categoryDetail = buildCategoryDetail(txns, data.categories, monthCount);
   const categoryTrend = buildCategoryTrend(txns, data.categories, months, categoryDetail, 6);
 
+  // These need the *full* transaction history (prior months, future recurring predictions), not
+  // just what's in `txns` — categoryMovers/merchantChurn look at the month before `ym` themselves,
+  // and detectRecurring needs enough history across the whole dataset to find a pattern at all.
+  let monthOverMonth: MonthOverMonth | null = null;
+  let subscriptions: ReportSubscriptions | null = null;
+  if (months.length === 1) {
+    const ym = months[0];
+    monthOverMonth = {
+      movers: categoryMovers(data.transactions, data.categories, ym),
+      churn: merchantChurn(data.transactions, ym, 3),
+    };
+    // Match the Subscriptions screen's own numbers exactly: a merchant the user dismissed as
+    // "not actually a subscription" shouldn't count as fixed spend or show up as a price change
+    // or upcoming charge here either, the same way it's excluded from that screen's list and totals.
+    const recurring = detectRecurring(data.transactions).filter(r => !data.settings.dismissedSubscriptions.includes(r.merchant));
+    const fixedMerchants = new Set(recurring.map(r => r.merchant));
+    subscriptions = {
+      split: fixedVsVariableSpend(data.transactions, ym, fixedMerchants),
+      priceChanges: recurring.filter(r => r.priceChange && toYM(r.priceChange.changedAt) === ym),
+      // Anchored to *today*, not the report's month — a monthly summary is typically generated at
+      // or just after month-end (see the Scheduled Reports feature), when "today" and "just after
+      // this report's range" are effectively the same moment. Re-deriving a synthetic anchor from
+      // a historical report's end date would answer a different, less useful question ("what was
+      // coming up back then") for the common case of viewing an older report.
+      upcoming: upcomingCharges(recurring, 30),
+    };
+  }
+
   return {
     title, range, expense, transactionCount, dailyAverage,
     categories, categoryDetail, categoryTrend, merchants, trend,
     transactions: [...txns].sort((a, b) => a.date.localeCompare(b.date)),
-    monthCount,
+    monthCount, monthOverMonth, subscriptions,
     generatedAt: todayISO(),
   };
 }

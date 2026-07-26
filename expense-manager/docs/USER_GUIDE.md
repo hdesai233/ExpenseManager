@@ -247,7 +247,14 @@ Four report templates, all built from the same underlying data so numbers
 always match what you see elsewhere in the app:
 
 - **Monthly Summary** — one month: totals, category breakdown, top
-  merchants, trend.
+  merchants, trend, **what changed vs. last month** (which categories
+  moved, in dollars and as a share of that month's total spend, plus any
+  merchants you stopped visiting), and **subscriptions & recurring**
+  (your fixed/variable split, any subscription price changes detected
+  that month, and what's due in the next 30 days). The last two only
+  appear when the report covers a single calendar month — on Annual or a
+  wide Custom range there's no one "last month" to compare against, so
+  they show an explanation instead of a number.
 - **Annual / Year-in-Review** — a full calendar year with the
   month-by-month trend front and center.
 - **Expense Breakdown** — a trailing window (1/3/6/12 months) with every

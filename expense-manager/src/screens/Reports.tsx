@@ -139,20 +139,27 @@ export default function Reports() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             {([
-              ['summary', 'Summary'], ['categoryBreakdown', 'Categories'], ['categoryDetail', 'Category detail'],
-              ['categoryTrend', 'Category trend'],
+              ['summary', 'Summary'], ['categoryBreakdown', 'Categories'],
+              ['monthOverMonth', 'What changed'], ['subscriptions', 'Subscriptions & recurring'],
+              ['categoryDetail', 'Category detail'], ['categoryTrend', 'Category trend'],
               ['topMerchants', 'Top merchants'], ['trend', 'Trend'], ['transactions', 'Itemized transactions'],
             ] as Array<[keyof ReportSections, string]>).map(([key, label]) => {
               const needsMultiMonth = (key === 'categoryTrend' || key === 'trend') && !canTrend;
+              const needsSingleMonth = (key === 'monthOverMonth' || key === 'subscriptions') && !report.monthOverMonth;
               return (
                 <label
                   key={key}
                   style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }}
-                  title={needsMultiMonth ? 'Needs a date range spanning more than one month — try Annual, Expense Breakdown with more months, or a wider Custom range.' : undefined}
+                  title={
+                    needsMultiMonth ? 'Needs a date range spanning more than one month — try Annual, Expense Breakdown with more months, or a wider Custom range.'
+                      : needsSingleMonth ? 'Needs a date range within a single calendar month — try Monthly Summary, or narrow a Custom range.'
+                      : undefined
+                  }
                 >
                   <input type="checkbox" checked={sections[key]} onChange={() => toggleSection(key)} />
                   {label}
                   {needsMultiMonth && <span style={{ color: 'var(--muted-3)', fontStyle: 'italic' }}>(needs 2+ months)</span>}
+                  {needsSingleMonth && <span style={{ color: 'var(--muted-3)', fontStyle: 'italic' }}>(needs 1 month)</span>}
                 </label>
               );
             })}
@@ -214,6 +221,128 @@ export default function Reports() {
                   </table>
                 </div>
               </div>
+            </ReportSection>
+          )}
+
+          {sections.monthOverMonth && (
+            <ReportSection title="What changed vs. last month">
+              {!report.monthOverMonth ? (
+                <EmptyNote>
+                  Needs a date range within a single calendar month — try Monthly Summary, or narrow a Custom range.
+                </EmptyNote>
+              ) : report.monthOverMonth.movers.length === 0 && report.monthOverMonth.churn.length === 0 ? (
+                <EmptyNote>Nothing moved compared with last month.</EmptyNote>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: report.monthOverMonth.churn.length > 0 ? '1.4fr 1fr' : '1fr', gap: 24 }}>
+                  <div>
+                    {report.monthOverMonth.movers.length === 0 ? (
+                      <div style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>No category moved by more than a few dollars.</div>
+                    ) : (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--soft-border)' }}>
+                            <Th align="left">Category</Th>
+                            <Th align="right">Last month</Th>
+                            <Th align="right">This month</Th>
+                            <Th align="right">Change</Th>
+                            <Th align="right">Share</Th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {report.monthOverMonth.movers.map(m => (
+                            <tr key={m.category.id} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                              <td style={{ padding: '5px 0', color: 'var(--ink-3)' }}>
+                                <span className="dot" style={{ width: 8, height: 8, background: m.category.color, marginRight: 7 }} />
+                                {m.category.name}
+                              </td>
+                              <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{usd(m.previous)}</td>
+                              <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--muted-2)' }}>{usd(m.current)}</td>
+                              <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 600, color: m.delta > 0 ? 'var(--red)' : 'var(--green-ok)' }}>
+                                {m.delta > 0 ? '+' : ''}{usd(m.delta)}
+                              </td>
+                              <td style={{ padding: '5px 0 5px 12px', textAlign: 'right', color: 'var(--muted-2)' }} title="Share of total spend, before → after">
+                                {Math.round(m.previousShare * 100)}%→{Math.round(m.currentShare * 100)}%
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  {report.monthOverMonth.churn.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--muted-3)', marginBottom: 9, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                        Merchants you stopped visiting
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {report.monthOverMonth.churn.slice(0, 6).map(c => (
+                          <div key={c.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, color: 'var(--ink-3)' }}>
+                            <span className="ellip">{c.name}</span>
+                            <span style={{ color: 'var(--muted-2)', flex: 'none' }}>{usd(c.priorAmount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </ReportSection>
+          )}
+
+          {sections.subscriptions && (
+            <ReportSection title="Subscriptions &amp; recurring">
+              {!report.subscriptions ? (
+                <EmptyNote>
+                  Needs a date range within a single calendar month — try Monthly Summary, or narrow a Custom range.
+                </EmptyNote>
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 18 }}>
+                    <SummaryTile label="Fixed spend" value={usd(report.subscriptions.split.fixed)} />
+                    <SummaryTile label="Variable spend" value={usd(report.subscriptions.split.variable)} />
+                    <SummaryTile label="Fixed share" value={`${Math.round(report.subscriptions.split.fixedPct * 100)}%`} />
+                  </div>
+
+                  {report.subscriptions.priceChanges.length > 0 && (
+                    <div style={{ marginBottom: 18 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--muted-3)', marginBottom: 9, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                        Price changes this month
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {report.subscriptions.priceChanges.map(r => (
+                          <div key={r.merchant} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--ink-3)' }}>
+                            <span>{r.merchant}</span>
+                            <span style={{ fontWeight: 600, color: r.priceChange!.toAmount > r.priceChange!.fromAmount ? 'var(--red)' : 'var(--green-ok)' }}>
+                              {usd2(r.priceChange!.fromAmount)} → {usd2(r.priceChange!.toAmount)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--muted-3)', marginBottom: 9, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                      Upcoming charges (next 30 days, as of today)
+                    </div>
+                    {report.subscriptions.upcoming.length === 0 ? (
+                      <div style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>Nothing due in the next 30 days.</div>
+                    ) : (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                        <tbody>
+                          {report.subscriptions.upcoming.map(u => (
+                            <tr key={u.merchant} style={{ borderBottom: '1px solid var(--row-border)' }}>
+                              <td style={{ padding: '5px 0', color: 'var(--muted)' }}>{shortDate(u.date)}</td>
+                              <td style={{ padding: '5px 8px', color: 'var(--ink-3)' }}>{u.merchant}</td>
+                              <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 600, color: 'var(--ink)' }}>{usd2(u.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </>
+              )}
             </ReportSection>
           )}
 

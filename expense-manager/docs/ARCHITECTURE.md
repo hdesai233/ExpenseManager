@@ -518,6 +518,42 @@ different default section toggles and range logic — Monthly defaults to
 the current month, Annual to the current year, Expense Breakdown to a
 trailing window, Custom to a user-picked range.
 
+Two sections — **"What changed vs. last month"** (`monthOverMonth`:
+`categoryMovers`, with its share-of-wallet fields, plus `merchantChurn`)
+and **"Subscriptions & recurring"** (`subscriptions`: `fixedVsVariableSpend`,
+recurring price changes, `upcomingCharges`) — reuse the Dashboard/
+Analytics/Trends analytics wholesale rather than reimplementing anything
+report-specific. Both are `null` on `ReportData` when the range doesn't
+resolve to exactly one calendar month (`months.length !== 1` —
+`buildReport`'s own `monthsSpanned` result), since `categoryMovers` and
+`fixedVsVariableSpend` are inherently anchored to a single `ym`; the UI
+follows the same disclose-rather-than-hide pattern already established
+for `trend`/`categoryTrend` needing 2+ months (an unavailable checkbox
+stays checked and visible, with an explanatory empty state, rather than
+silently vanishing).
+
+Both sections build their recurring-charge set the same way the
+Subscriptions screen does — `detectRecurring(data.transactions).filter(r
+=> !dismissedSubscriptions.includes(r.merchant))` — specifically so a
+report's "Fixed spend" figure and upcoming-charges list match what that
+screen shows for the same month exactly. `forecastMonthSpend` does *not*
+do this dismissal filtering (a dismissed merchant is still a real,
+predictable future charge for forecasting purposes, just not one worth
+cluttering the subscriptions-to-review list with) — two different
+consumers of the same detector legitimately want different filtering,
+and conflating them would have made the report's numbers quietly
+disagree with the screen a user would naturally compare it against.
+
+`upcoming` is anchored to `todayISO()`, the same as the Subscriptions
+screen, **not** to the report's own date range — a monthly summary is
+normally generated at or just after month-end (see Scheduled Reports
+below), when "today" and "right after this report's range" are the same
+moment in practice. Re-deriving a synthetic anchor from a historical
+report's end date would answer a different question ("what was coming up
+back then") for the more common case of opening an old report later, so
+"as of today" is called out explicitly in that section's heading to
+avoid it reading as if it were relative to the report's own month.
+
 Rendering and export live in `src/screens/Reports.tsx`, deliberately kept
 separate from the data layer:
 
